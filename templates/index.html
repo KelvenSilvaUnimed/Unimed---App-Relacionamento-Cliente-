@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Sistema de Clientes</title>
+
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+
+    <!-- Estilos do app -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style-main.css') }}" />
+
+    <!-- Ícones -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"/>
+    <style>
+      /* Ajustes leves de UX */
+      .main-content-card { background:#fff; border-radius:12px; padding:16px; box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+      .custom-modal-header { background: #0d6efd; }
+      .required-star { color:#dc3545; margin-left:4px; }
+      .table-skeleton td{height:42px;background:linear-gradient(90deg,#f2f2f2 25%,#e9ecef 37%,#f2f2f2 63%);background-size:400% 100%;animation: shimmer 1.4s ease infinite;}
+      @keyframes shimmer { 0%{background-position:100% 0} 100%{background-position:-100% 0} }
+      .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+    </style>
+  </head>
+
+  <body>
+    <nav class="navbar navbar-expand-lg custom-navbar shadow-sm">
+      <div class="container-fluid">
+        <span class="navbar-brand fw-bold text-white">Sistema de Clientes</span>
+        <div class="ms-auto d-flex align-items-center">
+          <span class="custom-header me-2">
+            <span>Remoção Área</span>
+            <i class="fas fa-plane header-icon"></i>
+          </span>
+          <button id="logoutBtn" class="btn btn-outline-light ms-3" aria-label="Sair do sistema">Sair</button>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container my-4">
+      <div class="main-content-card">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+          <h4 class="m-0">Clientes Cadastrados</h4>
+          <div class="d-flex align-items-center gap-2">
+            <div class="input-group input-group-sm" style="width: 200px;">
+              <label class="input-group-text" for="limitSelect">Itens</label>
+              <select id="limitSelect" class="form-select">
+                <option value="10" selected>10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+            <button id="novoCadastroBtn" class="btn btn-success custom-btn">
+              <i class="fa fa-plus me-1"></i> Novo Cadastro
+            </button>
+          </div>
+        </div>
+
+        <!-- Mensagens -->
+        <div id="mensagem" aria-live="polite"></div>
+
+        <!-- Tabela -->
+        <div class="table-responsive">
+          <table class="table table-striped table-hover align-middle text-center" id="clientesTable">
+            <thead class="table-dark">
+              <tr>
+                <th>Contrato</th>
+                <th>Matrícula</th>
+                <th>Competência Pagamento</th>
+                <th>Beneficiário</th>
+                <th>Valor (R$)</th>
+              </tr>
+            </thead>
+            <tbody id="clientesTbody">
+              <tr class="table-skeleton"><td colspan="5"></td></tr>
+              <tr class="table-skeleton"><td colspan="5"></td></tr>
+              <tr class="table-skeleton"><td colspan="5"></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mt-2">
+          <small id="pageInfo" class="text-muted">—</small>
+          <nav aria-label="Paginação de clientes">
+            <ul class="pagination pagination-sm justify-content-center m-0" id="paginacao"></ul>
+          </nav>
+        </div>
+      </div>
+    </main>
+
+    <!-- Modal: perguntar matrícula -->
+    <div class="modal fade" id="matriculaModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header custom-modal-header text-white">
+            <h5 class="modal-title">Iniciar Novo Cadastro</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <form id="matriculaForm" novalidate>
+              <label for="matriculaInput" class="form-label">
+                Digite a Matrícula <span class="required-star">*</span>
+              </label>
+              <input type="text" id="matriculaInput" class="form-control" required inputmode="numeric" autocomplete="off"/>
+              <div class="form-text">Somente números.</div>
+              <button type="submit" class="btn btn-success custom-btn w-100 mt-3">Próximo</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: formulário do cliente -->
+    <div class="modal fade" id="clienteModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header custom-modal-header text-white">
+            <h5 class="modal-title">Cadastrar Novo Cliente</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <form id="clienteForm" class="modal-body row g-3 needs-validation" novalidate></form>
+          <div class="modal-footer mt-3">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" form="clienteForm" class="btn btn-success custom-btn">Salvar Cliente</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+      // ------------------ Utilidades ------------------
+      const API = {
+        clientes: (page, limit) => `/api/clientes?page=${page}&limit=${limit}`,
+        ultimoCadastro: (matricula) => `/api/ultimo-cadastro-por-matricula?matricula=${encodeURIComponent(matricula)}`,
+        cadastrar: `/api/cadastrar-cliente`,
+      };
+
+      const escapeHTML = (s) => {
+        if (s === null || s === undefined) return "";
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      };
+
+      const formatCurrencyBRL = (v) => {
+        const n = Number(v ?? 0);
+        if (Number.isNaN(n)) return "0,00";
+        return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      };
+
+      const fetchJSON = async (url, options = {}, timeoutMs = 15000) => {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeoutMs);
+
+        const opts = {
+          credentials: "same-origin",
+          headers: { "Accept": "application/json", ...(options.headers || {}) },
+          signal: controller.signal,
+          ...options,
+        };
+
+        try {
+          const res = await fetch(url, opts);
+          clearTimeout(id);
+
+          if (res.status === 401) {
+            // sessão expirada
+            window.location.href = "/login";
+            return Promise.reject(new Error("Não autenticado"));
+          }
+
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            const msg = data?.msg || `Erro HTTP ${res.status}`;
+            throw new Error(msg);
+          }
+          return data;
+        } catch (err) {
+          clearTimeout(id);
+          throw err;
+        }
+      };
+
+      const showMessage = (text, type = "info") => {
+        const mensagemDiv = document.getElementById("mensagem");
+        mensagemDiv.innerHTML = `
+          <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+            ${escapeHTML(text)}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
+          </div>`;
+      };
+
+      // ------------------ Estado ------------------
+      let currentPage = 1;
+      let limit = 10;
+      let clienteModal, matriculaModal;
+
+      // ------------------ Campos e regras ------------------
+      const CAMPOS_OBRIGATORIOS = [
+        "MATRICULA","COMPETENCIA_PAGAMENTO","ITEM_COD","VALOR","COMPETENCIA_PROCESSAMENTO",
+        "DATA_EXECUCAO","IDADE","UNI_COD_RESPON","COD_CNTRAT_CART","COD","COD_DEPNTE",
+        "BENEFICIARIO","ITEM_DESCRI",
+      ];
+
+      const CAMPOS = [
+        { id:"MATRICULA", label:"Matrícula", type:"text", readOnly:false, prefill:false },
+        { id:"SEQUENCIA", label:"Sequência", type:"text", readOnly:true,  prefill:true },
+        { id:"TIPO_ATENDIMENTO", label:"Tipo Atendimento", type:"text", readOnly:false, prefill:true },
+        { id:"COD", label:"Cód", type:"text", readOnly:false, prefill:true },
+        { id:"STATUS", label:"Status", type:"text", readOnly:false, prefill:true },
+        { id:"CONTRATO", label:"Contrato", type:"text", prefill:true },
+        { id:"COMPETENCIA_PAGAMENTO", label:"Competência Pagamento", type:"text", prefill:false },
+        { id:"GUIA_COD_ID", label:"Guia Cod ID", type:"text", prefill:true },
+        { id:"COD_ID_GUIA_GERAL", label:"Cod ID Guia Geral", type:"text", prefill:true },
+        { id:"TP_GUIA", label:"TP Guia", type:"text", prefill:true },
+        { id:"ITEM_COD", label:"Item Cod", type:"text", prefill:false },
+        { id:"TIP_GUIA", label:"Tip Guia", type:"text", prefill:true },
+        { id:"VALOR", label:"Valor", type:"number", step:"0.01", prefill:false },
+        { id:"ORIGEM_REDE", label:"Origem Rede", type:"text", prefill:true },
+        { id:"DEMONSTRATIVO_FATURA", label:"Demonstrativo Fatura", type:"text", prefill:true },
+        { id:"COMPETENCIA_PROCESSAMENTO", label:"Competência Processamento", type:"text", prefill:false },
+        { id:"GUCID_COD_CID", label:"GUCID Cod CID", type:"text", prefill:true },
+        { id:"TP_ITEM", label:"TP Item", type:"text", prefill:true },
+        { id:"SEQ", label:"Seq", type:"text", prefill:true },
+        { id:"DATA_EXECUCAO", label:"Data de Execução", type:"date", prefill:false },
+        { id:"QTDE", label:"Qtde", type:"text", prefill:true },
+        { id:"LOCALIDADE", label:"Localidade", type:"text", prefill:true },
+        { id:"UNIMED_EXEC", label:"Unimed Exec", type:"text", prefill:true },
+        { id:"INDICACAO_CLINICA", label:"Indicação Clínica", type:"text", prefill:true },
+        { id:"GRUPO_FREQUENCIA", label:"Grupo Frequência", type:"text", prefill:true },
+        { id:"PREST_PAG", label:"Prest Pag", type:"text", prefill:true },
+        { id:"TIP_FOR", label:"Tip For", type:"text", prefill:true },
+        { id:"FORNECEDOR", label:"Fornecedor", type:"text", prefill:true },
+        { id:"ITEM_DESCRI", label:"Item Descrição", type:"text", prefill:false },
+        { id:"NM_SOLIC", label:"NM Solic", type:"text", prefill:true },
+        { id:"NC", label:"NC", type:"text", prefill:true },
+        { id:"TIPO_LANCAMENTO", label:"Tipo Lançamento", type:"text", prefill:true },
+        { id:"CAPITULO", label:"Capítulo", type:"text", prefill:true },
+        { id:"GRUPO", label:"Grupo", type:"text", prefill:true },
+        { id:"SUBGRUPO", label:"Subgrupo", type:"text", prefill:true },
+        { id:"CARATER_ATENDIMENTO", label:"Caráter Atendimento", type:"text", prefill:true },
+        { id:"IDADE", label:"Idade", type:"text", prefill:false },
+        { id:"TIPO_ACOMODACAO", label:"Tipo Acomodação", type:"text", prefill:true },
+        { id:"PARTICIPACAO", label:"Participação", type:"text", prefill:true },
+        { id:"UNIMED", label:"Unimed", type:"text", prefill:true },
+        { id:"GUIA_COD", label:"Guia Cod", type:"text", prefill:true },
+        { id:"GUIA_COD_PREST", label:"Guia Cod Prest", type:"text", prefill:true },
+        { id:"NOME_PREST", label:"Nome Prest", type:"text", prefill:true },
+        { id:"CBO_EXEC_NRO", label:"CBO Exec Nro", type:"text", prefill:true },
+        { id:"CBO_SOLIC_NRO", label:"CBO Solic Nro", type:"text", prefill:true },
+        { id:"VAL_FAT", label:"Val Fat", type:"text", prefill:true },
+        { id:"FAT_NRO", label:"Fat Nro", type:"text", prefill:true },
+        { id:"COD_PREST_PAGTO", label:"Cod Prest Pagto", type:"text", prefill:true },
+        { id:"UNI_COD_RESPON", label:"Unimed Cód Responsável", type:"text", prefill:false },
+        { id:"COD_CNTRAT_CART", label:"Cód Contrato Carteira", type:"text", prefill:false },
+        { id:"COD_DEPNTE", label:"Cód Dependente", type:"text", prefill:false },
+        { id:"BENEFICIARIO", label:"Beneficiário", type:"text", prefill:false },
+        { id:"GUITE_NRO_SENHA_SOLIT", label:"Guite Nro Senha Solicitado", type:"text", prefill:true },
+        { id:"PRESTADOR_EXECUTANTE_ITEM", label:"Prestador Executante Item", type:"text", prefill:true },
+        { id:"PARAMETRO_INT", label:"Parâmetro Int", type:"text", prefill:true },
+        { id:"PARAMETRO_LOC", label:"Parâmetro Loc", type:"text", prefill:true },
+        { id:"CPFCNPJ_EXEC", label:"CPF/CNPJ Executante", type:"text", prefill:true },
+        { id:"CPFCNPJ_SOL", label:"CPF/CNPJ Solicitado", type:"text", prefill:true },
+        { id:"OBSERVACO", label:"Observação", type:"text", prefill:true },
+      ];
+
+      const PREFILL_MAP = {
+        SEQUENCIA: "PROXIMA_SEQUENCIA",
+        TIPO_ATENDIMENTO: "REMOCAO",
+        COD: "PADRÃO",
+        STATUS: "ATIVO",
+      };
+
+      // ------------------ Tabela / Paginação ------------------
+      const clientesTbody = document.getElementById("clientesTbody");
+      const paginacao = document.getElementById("paginacao");
+      const pageInfo = document.getElementById("pageInfo");
+      const limitSelect = document.getElementById("limitSelect");
+
+      const renderSkeleton = () => {
+        clientesTbody.innerHTML = `
+          <tr class="table-skeleton"><td colspan="5"></td></tr>
+          <tr class="table-skeleton"><td colspan="5"></td></tr>
+          <tr class="table-skeleton"><td colspan="5"></td></tr>
+        `;
+      };
+
+      const montarPaginacao = (total, page, limit) => {
+        paginacao.innerHTML = "";
+        pageInfo.textContent = total > 0
+          ? `Página ${page} • ${Math.min(total, page*limit) - limit + 1}–${Math.min(total, page*limit)} de ${total}`
+          : "—";
+
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        if (totalPages <= 1) return;
+
+        const addItem = (label, p, disabled=false, active=false) => {
+          const li = document.createElement("li");
+          li.className = `page-item ${disabled ? "disabled" : ""} ${active ? "active" : ""}`;
+          li.innerHTML = `<button class="page-link" data-page="${p}">${escapeHTML(label)}</button>`;
+          paginacao.appendChild(li);
+        };
+
+        addItem("Anterior", Math.max(1, page - 1), page === 1, false);
+
+        const start = Math.max(1, page - 3);
+        const end = Math.min(totalPages, page + 3);
+        for (let p = start; p <= end; p++) addItem(String(p), p, false, p === page);
+
+        addItem("Próximo", Math.min(totalPages, page + 1), page === totalPages, false);
+      };
+
+      const carregarClientes = async (page = 1) => {
+        renderSkeleton();
+        try {
+          // aumenta timeout para lidar com consultas mais pesadas
+          const data = await fetchJSON(API.clientes(page, limit), {}, 60000);
+          const clientes = data.clientes || [];
+          const total = Number(data.total || 0);
+          currentPage = Number(data.page || page);
+
+          if (!clientes.length) {
+            clientesTbody.innerHTML = `<tr><td colspan="5" class="text-center">Nenhum cliente encontrado.</td></tr>`;
+          } else {
+            clientesTbody.innerHTML = clientes.map(c => `
+              <tr>
+                <td>${escapeHTML(c.CONTRATO ?? "-")}</td>
+                <td>${escapeHTML(c.MATRICULA ?? "-")}</td>
+                <td>${escapeHTML(c.COMPETENCIA_PAGAMENTO ?? "-")}</td>
+                <td>${escapeHTML(c.BENEFICIARIO ?? "-")}</td>
+                <td>${formatCurrencyBRL(c.VALOR)}</td>
+              </tr>
+            `).join("");
+          }
+
+          montarPaginacao(total, currentPage, limit);
+        } catch (err) {
+          console.error(err);
+          const msg = (err && err.name === 'AbortError')
+            ? "Tempo esgotado ao carregar clientes. Tente novamente."
+            : (err && err.message) || "Erro ao carregar clientes.";
+          showMessage(msg, "danger");
+          clientesTbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Erro ao carregar dados.</td></tr>`;
+        }
+      };
+
+      paginacao.addEventListener("click", (e) => {
+        const btn = e.target.closest("button.page-link");
+        if (!btn) return;
+        const p = Number(btn.dataset.page || 1);
+        carregarClientes(p);
+      });
+
+      limitSelect.addEventListener("change", () => {
+        limit = Math.max(1, Number(limitSelect.value || 10));
+        carregarClientes(1);
+      });
+
+      // ------------------ Novo Cadastro (matrícula) ------------------
+      const matriculaModalEl = document.getElementById("matriculaModal");
+      const clienteModalEl = document.getElementById("clienteModal");
+      const matriculaForm = document.getElementById("matriculaForm");
+      const matriculaInput = document.getElementById("matriculaInput");
+      const clienteForm = document.getElementById("clienteForm");
+
+      document.getElementById("logoutBtn").addEventListener("click", () => window.location.href = "/logout");
+      document.getElementById("novoCadastroBtn").addEventListener("click", () => { matriculaForm.reset(); matriculaModal.show(); });
+
+      const montarFormulario = (dados = {}) => {
+        clienteForm.innerHTML = "";
+        const dataHoje = new Date().toISOString().slice(0,10);
+
+        CAMPOS.forEach(campo => {
+          const isRequired = CAMPOS_OBRIGATORIOS.includes(campo.id);
+          let valor = "";
+
+          // 1) valor vindo da API
+          if (dados[campo.id] !== undefined && dados[campo.id] !== null) valor = dados[campo.id];
+          // 2) prefill do mapa
+          else if (PREFILL_MAP[campo.id] !== undefined) {
+            const mapa = PREFILL_MAP[campo.id];
+            valor = dados[mapa] ?? mapa;
+          }
+          // 3) valores especiais
+          if (campo.id === "DATA_EXECUCAO" && !valor) valor = dataHoje;
+          if (campo.type === "number" && valor !== "" && valor !== null) valor = Number(valor);
+
+          const requiredStar = isRequired ? `<span class="required-star">*</span>` : "";
+          const ro = campo.readOnly ? "readonly" : "";
+          const stepAttr = campo.type === "number" ? `step="${campo.step || '0.01'}"` : "";
+
+          clienteForm.insertAdjacentHTML("beforeend", `
+            <div class="col-md-6">
+              <label for="${campo.id}" class="form-label">${escapeHTML(campo.label)} ${requiredStar}</label>
+              <input id="${campo.id}" name="${campo.id}" type="${campo.type}" class="form-control"
+                     value="${campo.type==='number' ? escapeHTML(valor) : escapeHTML(valor)}" ${ro} ${isRequired ? "required" : ""} ${stepAttr}>
+            </div>
+          `);
+        });
+      };
+
+      matriculaForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const matricula = (matriculaInput.value || "").trim().replace(/\D/g, "");
+        if (!matricula) {
+          showMessage("Informe uma matrícula válida (somente números).", "warning");
+          return;
+        }
+        matriculaModal.hide();
+        try {
+          const result = await fetchJSON(API.ultimoCadastro(matricula));
+          const dados = { ...(result?.data || {}), MATRICULA: matricula };
+          // garantia de fallback para TIPO_ATENDIMENTO
+          if (!dados.TIPO_ATENDIMENTO) dados.TIPO_ATENDIMENTO = "REMOCAO";
+
+          // Preenche SEQUENCIA com PROXIMA_SEQUENCIA quando vier da API
+          if (dados.PROXIMA_SEQUENCIA !== undefined && dados.PROXIMA_SEQUENCIA !== null) {
+            dados.SEQUENCIA = String(dados.PROXIMA_SEQUENCIA);
+          }
+
+          // Zera campos obrigatórios (para usuário preencher), exceto MATRÍCULA e SEQUENCIA
+          CAMPOS_OBRIGATORIOS.forEach((k) => {
+            if (k !== "MATRICULA" && k !== "SEQUENCIA") {
+              dados[k] = "";
+            }
+          });
+          montarFormulario(dados);
+          clienteModal.show();
+        } catch (err) {
+          console.error(err);
+          showMessage("Erro ao carregar dados anteriores da matrícula.", "danger");
+        }
+      });
+
+      // ------------------ Envio do cadastro ------------------
+      clienteForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const data = Object.fromEntries(formData.entries());
+
+        // Normalizações leves
+        if (data.VALOR !== undefined && data.VALOR !== "") {
+          const num = Number(String(data.VALOR).replace(",", "."));
+          if (!Number.isNaN(num)) data.VALOR = num;
+        }
+
+        try {
+          const result = await fetchJSON(API.cadastrar, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+          showMessage(result?.msg || "Cliente cadastrado com sucesso!", "success");
+          clienteModal.hide();
+          clienteForm.reset();
+          document.getElementById("novoCadastroBtn").focus();
+          carregarClientes(currentPage);
+        } catch (err) {
+          console.error(err);
+          showMessage(err.message || "Erro ao salvar cliente.", "danger");
+        }
+      });
+
+      // ------------------ Sessão / inatividade ------------------
+      let timeoutTimer;
+      const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 min
+      const redirectToLogin = () => { alert("Sua sessão expirou por inatividade. Faça login novamente."); window.location.href = "/login"; };
+      const resetTimer = () => { clearTimeout(timeoutTimer); timeoutTimer = setTimeout(redirectToLogin, INACTIVITY_TIMEOUT); };
+      ["load","mousemove","mousedown","click","keypress","scroll"].forEach(evt => window.addEventListener(evt, resetTimer));
+      resetTimer();
+
+      // ------------------ Bootstrap modals ------------------
+      document.addEventListener("DOMContentLoaded", () => {
+        clienteModal = new bootstrap.Modal(clienteModalEl);
+        matriculaModal = new bootstrap.Modal(matriculaModalEl);
+        carregarClientes(1);
+      });
+    </script>
+  </body>
+</html>
+

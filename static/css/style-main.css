@@ -1,0 +1,92 @@
+/* Importação de fontes e ícones */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+/* Estilo do corpo da página com a imagem de fundo */
+body {
+    background-image: url('../img/fundo-unimed-main.webp'); /* Certifique-se de que o nome da imagem está correto */
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    font-family: 'Roboto', sans-serif;
+    color: #333; /* Cor do texto padrão */
+    min-height: 100vh;
+    padding-bottom: 60px; /* Espaço para o rodapé fixo */
+    position: relative;
+}
+
+/* Estilo da barra de navegação superior */
+.custom-navbar {
+    background-color: #008945 !important; /* Verde Unimed */
+    border-bottom: 3px solid #0056b3; /* Um toque de azul para contraste */
+}
+
+/* Título e ícone de "Remoção Área" */
+.custom-header {
+    color: #fff;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.header-icon {
+    font-size: 1.2rem;
+}
+
+/* Card principal que contém a tabela */
+.main-content-card {
+    background: rgba(255, 255, 255, 0.9);
+    padding: 2rem;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+/* Botões com a cor da marca */
+.custom-btn {
+    background-color: #008945; /* Verde Unimed */
+    border-color: #008945;
+    transition: background-color 0.3s ease;
+}
+
+.custom-btn:hover {
+    background-color: #006D35; /* Verde mais escuro no hover */
+    border-color: #006D35;
+}
+
+/* Estilo da tabela e cabeçalho */
+.table thead th {
+    background-color: #0056b3; /* Azul para contraste no cabeçalho */
+    color: #fff;
+}
+
+.table-striped>tbody>tr:nth-of-type(odd)>* {
+    background-color: rgba(0, 137, 69, 0.1); /* Faixas levemente verdes */
+}
+
+/* Rodapé */
+.custom-footer {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    padding: 10px 20px;
+    color: #fff;
+    font-size: 0.8rem;
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(5px);
+    border-top-left-radius: 10px;
+}
+
+/* Modais */
+.custom-modal-header {
+    background-color: #008945; /* Verde Unimed */
+}
+
+/* Estrelinha de campo obrigatório */
+.required-star {
+    color: #ff9900; /* Laranja Unimed */
+}
