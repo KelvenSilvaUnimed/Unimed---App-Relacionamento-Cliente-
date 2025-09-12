@@ -3,7 +3,7 @@
 ##
 
 # 1) Base Python minimalista (mantemos 3.9 para compatibilidade do projeto)
-FROM python:3.9-slim-bookworm
+FROM python:3.11-slim-bookworm
 
 # 2) Configurações de ambiente básicas e caminhos
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -20,7 +20,7 @@ RUN useradd -m -r -s /bin/false app && mkdir -p /app/data
 
 # 4) Dependências de sistema (libaio para uso eventual do modo THICK)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libaio1 curl \
+ && apt-get install -y --no-install-recommends libaio1 curl libgfortran5 \
  && rm -rf /var/lib/apt/lists/*
 
 # 5) Instala dependências Python primeiro (melhor cache)
@@ -37,13 +37,15 @@ RUN chown -R app:app /app
 USER app
 
 # 8) Porta da aplicação
-EXPOSE 5000
+EXPOSE 8000
 
 # 9) Healthcheck simples (usa endpoint /healthz)
 # Nota: evitamos heredoc aqui porque alguns linters não entendem; usamos curl diretamente.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:5000/healthz >/dev/null || exit 1
+  CMD curl -fsS http://127.0.0.1:8000/healthz >/dev/null || exit 1
 
 # 10) Processo de produção com Gunicorn
 # Obs: variável PORT pode ser passada em runtime, padrão 5000
-CMD ["gunicorn", "-w", "2", "-k", "gthread", "-t", "60", "-b", "0.0.0.0:${PORT:-5000}", "app:app"]
+CMD ["gunicorn", "-w", "2", "-k", "gthread", "-t", "60", "-b", "0.0.0.0:${PORT:-8000}", "app:app"]
+
+
