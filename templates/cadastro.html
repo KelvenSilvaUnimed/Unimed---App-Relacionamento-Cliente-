@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cadastro de Usuário • Sistema de Clientes</title>
+
+  <!-- Bootstrap (mesmo padrão do login/index) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+
+  <!-- Estilos do app -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style-cadastro.css') }}"/>
+
+  <!-- Ícones -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+
+  <style>
+    .custom-header, .custom-footer { display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:#0d6efd; color:#fff; }
+    .custom-footer { background:#111827; font-size:.9rem; }
+    .header-icon { width:24px; height:24px; margin-left:8px; }
+    .card-cadastro { max-width:560px; margin:40px auto; background:#fff; padding:24px; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,.08); }
+    .label-form { font-weight:600; margin-bottom:4px; }
+    .password-wrapper { position:relative; }
+    .toggle-password { position:absolute; right:10px; top:50%; transform:translateY(-50%); border:none; background:transparent; padding:4px; }
+    .badge-strength { font-size:.75rem; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+  </style>
+</head>
+
+<body>
+  <!-- Cabeçalho -->
+  <div class="custom-header">
+    <span>Remoção Área</span>
+    <img src="{{ url_for('static', filename='img/aviao.png') }}" alt="Ícone de Avião" class="header-icon">
+  </div>
+
+  <!-- Cartão -->
+  <main class="card-cadastro">
+    <h1 class="text-center mb-3">Cadastro de Usuário</h1>
+
+    <div id="mensagem" class="alert d-none" role="alert" aria-live="polite"></div>
+
+    <form id="cadastroForm" autocomplete="off" novalidate>
+      <div class="mb-3">
+        <label for="nome" class="label-form">Nome</label>
+        <input type="text" id="nome" name="nome" class="form-control" required minlength="3" maxlength="120" autofocus/>
+        <div class="form-text">Mínimo 3 caracteres.</div>
+      </div>
+
+      <div class="mb-3">
+        <label for="login" class="label-form">Login</label>
+        <input type="text" id="login" name="login" class="form-control" required maxlength="80" spellcheck="false" autocomplete="username"/>
+        <div class="form-text">Use letras, números e . _ - (sem espaços).</div>
+      </div>
+
+      <div class="mb-3">
+        <label for="email" class="label-form">Email</label>
+        <input type="email" id="email" name="email" class="form-control" required maxlength="160" autocomplete="email"/>
+      </div>
+
+      <div class="mb-3 password-wrapper">
+        <label for="senha" class="label-form">Senha</label>
+        <input type="password" id="senha" name="senha" class="form-control" required minlength="8" autocomplete="new-password" maxlength="128"/>
+        <button type="button" class="toggle-password" aria-label="Mostrar/ocultar senha" tabindex="-1">
+          <i class="fa-regular fa-eye"></i>
+        </button>
+        <div class="d-flex align-items-center justify-content-between mt-1">
+          <small id="capsNotice" class="text-warning d-none">
+            <i class="fa-solid fa-triangle-exclamation me-1"></i> Caps Lock ativado
+          </small>
+          <span id="pwdStrength" class="badge rounded-pill text-bg-secondary badge-strength">Força: —</span>
+        </div>
+        <div class="form-text">Mínimo 8 caracteres. Evite reutilizar sua senha.</div>
+      </div>
+
+      <div class="mb-3 password-wrapper">
+        <label for="confirmar" class="label-form">Confirmar senha</label>
+        <input type="password" id="confirmar" class="form-control" required minlength="8" autocomplete="new-password" maxlength="128"/>
+        <button type="button" class="toggle-password" aria-label="Mostrar/ocultar senha" tabindex="-1">
+          <i class="fa-regular fa-eye"></i>
+        </button>
+      </div>
+
+      <div class="mb-2">
+        <label for="funcao" class="label-form">Função</label>
+        <select id="funcao" name="funcao" class="form-select" required>
+          <option value="ADMIN">ADMIN</option>
+          <option value="USUARIO_N1" selected>USUARIO_N1</option>
+        </select>
+      </div>
+
+      <button id="submitBtn" type="submit" class="btn btn-success w-100 mt-2">
+        <span class="btn-text">Cadastrar</span>
+        <span class="spinner-border spinner-border-sm ms-2 d-none" role="status" aria-hidden="true"></span>
+      </button>
+    </form>
+
+    <p class="mt-3 text-center">
+      Já tem uma conta?
+      <a href="/login" class="link-unimed">Faça login aqui</a>
+    </p>
+  </main>
+
+  <!-- Rodapé -->
+  <div class="custom-footer">
+    <span>Direitos Reservados - Unimed Patos de Minas</span>
+    <span>Desenvolvido por Kelven Silva</span>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // ---------- Helpers ----------
+    const mensagemDiv = document.getElementById("mensagem");
+    const showMessage = (text, type="info") => {
+      mensagemDiv.classList.remove("d-none","alert-info","alert-success","alert-danger","alert-warning");
+      mensagemDiv.classList.add(`alert-${type}`);
+      mensagemDiv.textContent = text;
+    };
+    const clearMessage = () => {
+      mensagemDiv.classList.add("d-none");
+      mensagemDiv.classList.remove("alert-info","alert-success","alert-danger","alert-warning");
+      mensagemDiv.textContent = "";
+    };
+
+    const fetchJSON = async (url, options = {}, timeoutMs = 15000) => {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, {
+          credentials: "same-origin",
+          headers: { "Accept": "application/json", ...(options.headers || {}) },
+          signal: controller.signal,
+          ...options,
+        });
+        clearTimeout(id);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg = data?.msg || `Erro HTTP ${res.status}`;
+          const err = new Error(msg);
+          err.status = res.status;
+          throw err;
+        }
+        return data;
+      } catch (err) {
+        clearTimeout(id);
+        throw err;
+      }
+    };
+
+    const setLoading = (loading) => {
+      submitBtn.disabled = loading;
+      spinner.classList.toggle("d-none", !loading);
+      btnText.textContent = loading ? "Enviando..." : "Cadastrar";
+    };
+
+    // ---------- Elementos ----------
+    const form = document.getElementById("cadastroForm");
+    const submitBtn = document.getElementById("submitBtn");
+    const spinner = submitBtn.querySelector(".spinner-border");
+    const btnText = submitBtn.querySelector(".btn-text");
+
+    const nome = document.getElementById("nome");
+    const login = document.getElementById("login");
+    const email = document.getElementById("email");
+    const senha = document.getElementById("senha");
+    const confirmar = document.getElementById("confirmar");
+    const funcao = document.getElementById("funcao");
+    const pwdStrength = document.getElementById("pwdStrength");
+    const capsNotice = document.getElementById("capsNotice");
+
+    // ---------- Mostrar/Ocultar senha ----------
+    document.querySelectorAll(".password-wrapper .toggle-password").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const input = btn.previousElementSibling; // input imediatamente antes
+        const isPwd = input.type === "password";
+        input.type = isPwd ? "text" : "password";
+        const icon = btn.querySelector("i");
+        icon.classList.toggle("fa-eye");
+        icon.classList.toggle("fa-eye-slash");
+      });
+    });
+
+    // ---------- Caps Lock detector ----------
+    const capsHandler = (e) => {
+      const caps = e.getModifierState && e.getModifierState("CapsLock");
+      capsNotice.classList.toggle("d-none", !caps);
+    };
+    senha.addEventListener("keydown", capsHandler);
+    senha.addEventListener("keyup", capsHandler);
+
+    // ---------- Força de senha (simples) ----------
+    const scoreSenha = (s) => {
+      let score = 0;
+      if (s.length >= 8) score++;
+      if (/[a-z]/.test(s)) score++;
+      if (/[A-Z]/.test(s)) score++;
+      if (/\d/.test(s)) score++;
+      if (/[^A-Za-z0-9]/.test(s)) score++;
+      return Math.min(score, 5);
+    };
+    const updateStrength = () => {
+      const s = senha.value || "";
+      const score = scoreSenha(s);
+      const labels = ["—","Muito fraca","Fraca","Ok","Boa","Forte"];
+      const colors = ["secondary","danger","warning","primary","success","success"];
+      pwdStrength.textContent = `Força: ${labels[score]}`;
+      pwdStrength.className = `badge rounded-pill text-bg-${colors[score]} badge-strength`;
+    };
+    senha.addEventListener("input", updateStrength);
+
+    // ---------- Validações adicionais ----------
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const loginRegex = /^[A-Za-z0-9._-]{3,}$/;
+
+    const validateForm = () => {
+      if (!nome.value.trim() || nome.value.trim().length < 3) {
+        showMessage("Informe um nome válido (mín. 3 caracteres).", "warning"); return false;
+      }
+      if (!loginRegex.test(login.value.trim())) {
+        showMessage("Login inválido. Use letras, números e . _ - (mín. 3).", "warning"); return false;
+      }
+      if (!emailRegex.test(email.value.trim())) {
+        showMessage("Email inválido.", "warning"); return false;
+      }
+      if ((senha.value || "").length < 8) {
+        showMessage("A senha deve ter pelo menos 8 caracteres.", "warning"); return false;
+      }
+      if (senha.value === login.value) {
+        showMessage("A senha não deve ser igual ao login.", "warning"); return false;
+      }
+      if (confirmar.value !== senha.value) {
+        showMessage("As senhas não coincidem.", "warning"); return false;
+      }
+      if (!funcao.value) {
+        showMessage("Selecione uma função.", "warning"); return false;
+      }
+      return true;
+    };
+
+    // ---------- Submit ----------
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      clearMessage();
+      if (!validateForm()) return;
+
+      const payload = {
+        nome: nome.value.trim(),
+        login: login.value.trim(),
+        email: email.value.trim(),
+        senha: senha.value,     // API atual espera texto; quando migrar p/ hash, só trocar no backend
+        funcao: funcao.value
+      };
+
+      try {
+        setLoading(true);
+        const result = await fetchJSON("/api/cadastro", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        showMessage(result?.msg || "Cadastro realizado com sucesso! Redirecionando…", "success");
+        form.reset();
+        updateStrength();
+        setTimeout(() => window.location.href = "/login", 1200);
+      } catch (err) {
+        console.error(err);
+        // Trata duplicidade de login (409) de forma amigável
+        if (err.status === 409) {
+          showMessage("Este login já está em uso. Tente outro.", "danger");
+        } else {
+          showMessage(err.message || "Erro no cadastro.", "danger");
+        }
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    // Enter em qualquer campo envia
+    ["nome","login","email","senha","confirmar"].forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") form.dispatchEvent(new Event("submit", { cancelable:true, bubbles:true }));
+      });
+    });
+
+    // força inicial
+    updateStrength();
+  </script>
+</body>
+</html>

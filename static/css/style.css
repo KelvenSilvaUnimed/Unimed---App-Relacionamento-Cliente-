@@ -1,0 +1,132 @@
+
+/* Font */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+/* Unimed Palette */
+:root {
+  --uni-green: #008945;
+  --uni-green-dark: #006D35;
+  --uni-orange: #ff8c00;
+  --uni-orange-light: #ffb347;
+  --uni-white: #ffffff;
+  --uni-shadow: rgba(0, 0, 0, 0.25);
+}
+
+body {
+  background-image: url('../img/bg1.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: var(--uni-white);
+  font-family: 'Roboto', sans-serif;
+  position: relative;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Container do formulário de login */
+.login-container {
+  background: rgba(0, 137, 69, 0.88);
+  padding: 2.5rem;
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px var(--uni-shadow);
+  width: 100%;
+  max-width: 420px;
+  transition: transform 0.2s ease-in-out;
+}
+.login-container:hover { transform: translateY(-3px); }
+
+.login-container h2 {
+  color: var(--uni-white);
+  font-weight: 700;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+
+.form-label { color: var(--uni-white); font-weight: 500; }
+
+.form-control {
+  background-color: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #193a2d;
+  border-radius: 8px;
+}
+.form-control:focus {
+  outline: none;
+  border-color: var(--uni-orange);
+  box-shadow: 0 0 0 3px rgba(255, 140, 0, 0.25);
+}
+
+.btn-primary {
+  background-image: linear-gradient(180deg, var(--uni-green), var(--uni-green-dark));
+  border-color: var(--uni-green-dark);
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+.btn-primary:hover { filter: brightness(1.03); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+
+.login-container a {
+  color: var(--uni-orange);
+  font-weight: 700;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+.login-container a:hover { color: var(--uni-orange-light); text-decoration: underline; }
+
+/* Cabeçalho superior direito */
+.custom-header {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(5px);
+  padding: 10px 15px;
+  border-radius: 20px;
+  color: var(--uni-white);
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+.header-icon { height: 24px; width: auto; }
+
+/* Rodapé inferior direito */
+.custom-footer {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  color: var(--uni-white);
+  font-size: 0.8rem;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(5px);
+  padding: 10px 15px;
+  border-radius: 10px;
+}
+.custom-footer span { display: block; }
+
+
+.login-container { background:#fff; padding:2.25rem; border-radius:16px; box-shadow:0 20px 40px rgba(0,0,0,.12); width:100%; max-width:460px; margin:48px auto; transition: transform .2s ease-in-out, box-shadow .2s ease-in-out; }
+.login-container:hover { transform: translateY(-2px); box-shadow: 0 24px 48px rgba(0,0,0,.14); }
+.login-container h2 { color:#0b6e44; font-weight:700; text-shadow:none; }
+.form-label { color:#1f2d28; font-weight:500; }
+.login-container .form-control { background:#f8fbf9; border:1.5px solid #d7e3dd; color:#1d2b26; border-radius:10px; padding:.65rem .9rem; }
+.login-container .form-control:focus { outline:none; border-color: var(--uni-orange); box-shadow:0 0 0 3px rgba(255,140,0,.2); }
+.login-container .form-control::placeholder { color:#90a39b; }
+.login-container .toggle-password { color:#6b7f78; }
+.login-container .toggle-password:hover { color:#3c524b; }
+.btn-primary { border-radius:10px; }
+
+.form-control::placeholder{color:#90a39b;}
+.password-wrapper .toggle-password{color:#6b7f78;}
+.password-wrapper .toggle-password:hover{color:#3c524b;}
