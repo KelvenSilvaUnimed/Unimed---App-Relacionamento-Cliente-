@@ -8,7 +8,7 @@ services:
     container_name: unimed-relacionamento
     restart: unless-stopped
     ports:
-      - "5000:5000" # host:container
+      - "8000:8000" # host:container
     env_file:
       - .env
     environment:
@@ -16,6 +16,8 @@ services:
       SQLITE_DB_PATH: /app/data/relacionamento_cliente.db
       # Deixe vazio para usar modo THIN (sem Instant Client). Se for usar THICK, veja o volume opcional abaixo.
       ORACLE_THICK_LIB_DIR: ""
+      # Porta interna exposta pelo Gunicorn
+      PORT: 8000
     volumes:
       # Volume nomeado para persistir o banco SQLite
       - unimed_data:/app/data
@@ -23,7 +25,7 @@ services:
       # - ./instantclient:/opt/instantclient:ro
     # Healthcheck equivalente ao Dockerfile
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5000/healthz"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
       interval: 30s
       timeout: 5s
       start_period: 20s
@@ -32,4 +34,3 @@ services:
 volumes:
   unimed_data:
     name: unimed_data
-
