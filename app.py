@@ -2,7 +2,8 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 from flask_restful import Api, Resource
 from contextlib import contextmanager
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from collections import OrderedDict
 from dotenv import load_dotenv
 import logging
 import os
@@ -27,7 +28,6 @@ class Config:
     SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", os.path.join(BASE_DIR, "relacionamento_cliente.db"))
     SQLITE_TIMEOUT = int(os.getenv("SQLITE_TIMEOUT", "10"))
 
-    # Oracle iguais ao seu script que funciona
     ORACLE_USER = os.getenv("ORACLE_USER", "integracaop")
     ORACLE_PASSWORD = os.getenv("ORACLE_PASSWORD", "")
     ORACLE_HOST = os.getenv("ORACLE_HOST", "172.82.0.5")
@@ -96,6 +96,106 @@ def get_oracle_table_columns():
         log.error(f"Erro ao buscar colunas Oracle: {e}")
         _ORACLE_TABLE_COLUMNS = []
     return _ORACLE_TABLE_COLUMNS
+
+
+_ORACLE_TABLE_METADATA = OrderedDict()
+
+
+def get_oracle_table_metadata():
+    global _ORACLE_TABLE_METADATA
+    if _ORACLE_TABLE_METADATA:
+        return _ORACLE_TABLE_METADATA
+
+    owner, table = _split_owner_table(app.config['ORACLE_TABLE_CLIENTES'])
+    meta = OrderedDict()
+    try:
+        with get_oracle_conn() as conn:
+            cur = conn.cursor()
+            if owner:
+                cur.execute(
+                    """
+                        SELECT column_name, data_type, data_precision, data_scale, nullable, column_id
+                        FROM all_tab_columns
+                        WHERE owner = :owner AND table_name = :table
+                        ORDER BY column_id
+                    """,
+                    {"owner": owner, "table": table},
+                )
+            else:
+                cur.execute(
+                    """
+                        SELECT column_name, data_type, data_precision, data_scale, nullable, column_id
+                        FROM user_tab_columns
+                        WHERE table_name = :table
+                        ORDER BY column_id
+                    """,
+                    {"table": table},
+                )
+            for name, dtype, precision, scale, nullable, col_id in cur:
+                meta[name.upper()] = {
+                    "data_type": (dtype or "").upper(),
+                    "data_precision": precision,
+                    "data_scale": scale,
+                    "nullable": (nullable or "Y") == "Y",
+                    "column_id": col_id,
+                }
+    except Exception as e:
+        log.error(f"Erro ao buscar metadados da tabela Oracle: {e}")
+        meta = OrderedDict()
+
+    _ORACLE_TABLE_METADATA = meta
+    return _ORACLE_TABLE_METADATA
+
+
+def normalize_bind_value(column, value, meta):
+    if meta is None:
+        return value
+
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if trimmed == "":
+            return None
+        value = trimmed
+
+    dtype = (meta.get("data_type") or "").upper()
+
+    if dtype in {"CHAR", "NCHAR", "VARCHAR2", "NVARCHAR2", "CLOB"}:
+        return str(value)
+
+    if dtype == "DATE":
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, datetime.min.time())
+        if isinstance(value, str):
+            candidate = value.replace("Z", "")
+            try:
+                return datetime.fromisoformat(candidate)
+            except ValueError:
+                for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y%m%d"):
+                    try:
+                        return datetime.strptime(candidate, fmt)
+                    except ValueError:
+                        continue
+        raise ValueError("formato de data invalido (use AAAA-MM-DD)")
+
+    if dtype == "NUMBER":
+        try:
+            decimal_value = Decimal(str(value).replace(",", "."))
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError("valor numerico invalido") from exc
+
+        scale = meta.get("data_scale")
+        if scale and int(scale) > 0:
+            return decimal_value
+        if decimal_value == decimal_value.to_integral_value():
+            return int(decimal_value)
+        return decimal_value
+
+    return value
 
 # ====================================================================
 # ORACLE helpers
@@ -299,43 +399,51 @@ class BuscarUltimoCadastro(Resource):
             with get_oracle_conn() as conn:
                 cur = conn.cursor()
 
-                # Query conforme especificação: último registro por matrícula (REMOCAO)
-                # e cálculo da próxima sequência baseado no MAX geral
+                # Query: busca o último cadastro da matrícula priorizando casos de remoção e calcula a próxima sequência global
+
                 sql = f"""
-                    SELECT 
-                        NVL(MAX_GERAL.SEQUENCIA_GERAL, 0) AS SEQUENCIA_GERAL,
-                        NVL(MAX_GERAL.SEQUENCIA_GERAL + 1, 1) AS PROXIMA_SEQUENCIA,
-                        ULTIMO.*
-                    FROM (
-                        SELECT *
-                        FROM (
-                            SELECT u.*,
-                                   ROW_NUMBER() OVER (
-                                       ORDER BY u.COMPETENCIA_PROCESSAMENTO DESC, u.SEQUENCIA DESC
-                                   ) AS RN
-                            FROM {app.config['ORACLE_TABLE_CLIENTES']} u
-                            WHERE u.TIPO_ATENDIMENTO = 'REMOCAO'
-                              AND u.MATRICULA = :matricula
-                        )
-                        WHERE RN = 1
-                    ) ULTIMO
-                    LEFT JOIN (
+                    WITH CANDIDATOS AS (
+                        SELECT u.*,
+                               ROW_NUMBER() OVER (
+                                   ORDER BY
+                                       CASE
+                                           WHEN TRANSLATE(UPPER(TRIM(u.TIPO_ATENDIMENTO)), UNISTR('\\00C7\\00C3\\00C2\\00C1\\00C0\\00D5'), 'CAAAAO') = 'REMOCAO' THEN 0
+                                           ELSE 1
+                                       END,
+                                       u.COMPETENCIA_PROCESSAMENTO DESC NULLS LAST,
+                                       u.SEQUENCIA DESC NULLS LAST
+                               ) AS RN
+                        FROM {app.config['ORACLE_TABLE_CLIENTES']} u
+                        WHERE u.MATRICULA = :matricula
+                    ),
+                    MAX_GERAL AS (
                         SELECT MAX(SEQUENCIA) AS SEQUENCIA_GERAL FROM {app.config['ORACLE_TABLE_CLIENTES']}
-                    ) MAX_GERAL ON 1 = 1
+                    )
+                    SELECT
+                        NVL(MAX_GERAL.SEQUENCIA_GERAL, 0) AS SEQUENCIA_GERAL,
+                        NVL(MAX_GERAL.SEQUENCIA_GERAL, 0) + 1 AS PROXIMA_SEQUENCIA,
+                        ULTIMO.*
+                    FROM MAX_GERAL
+                    LEFT JOIN (
+                        SELECT * FROM CANDIDATOS WHERE RN = 1
+                    ) ULTIMO ON 1 = 1
                 """
                 cur.execute(sql, {"matricula": matricula})
                 row = cur.fetchone()
 
-                data = {"MATRICULA": matricula, "TIPO_ATENDIMENTO": "REMOCAO"}
+                data = {"MATRICULA": matricula}
+                tem_cadastro = False
                 if row:
                     cols = [d[0] for d in cur.description]
-                    data.update(row_to_dict(cols, row))
+                    row_dict = row_to_dict(cols, row)
+                    data.update(row_dict)
+                    tem_cadastro = any(
+                        row_dict.get(col) is not None
+                        for col in row_dict
+                        if col not in {"SEQUENCIA_GERAL", "PROXIMA_SEQUENCIA"}
+                    )
 
-                # Garantias mínimas
-                if not data.get("TIPO_ATENDIMENTO"):
-                    data["TIPO_ATENDIMENTO"] = "REMOCAO"
-
-                msg = "Dados encontrados." if row else "Nenhum cadastro anterior encontrado para esta matrícula."
+                msg = "Dados encontrados." if tem_cadastro else "Nenhum cadastro anterior encontrado para esta matrícula."
                 return {"msg": msg, "data": data}, 200
 
         except Exception as e:
@@ -347,25 +455,54 @@ class CadastrarCliente(Resource):
         auth = require_login()
         if auth: return auth
 
-        payload = request.get_json(silent=True)
+        payload = request.get_json(silent=True) or {}
         if not payload:
             return {"msg": "Nenhum dado recebido."}, 400
 
         try:
-            columns = get_oracle_table_columns()
-            if not columns:
-                return {"msg": "Não foi possível obter as colunas da tabela Oracle."}, 500
+            metadata = get_oracle_table_metadata()
+            if not metadata:
+                return {"msg": "Nao foi possivel obter os metadados da tabela Oracle."}, 500
 
-            valid = {k.upper(): v for k, v in (payload or {}).items() if k.upper() in columns}
-            if not valid:
-                return {"msg": "Nenhuma coluna válida para inserção."}, 400
+            incoming = OrderedDict()
+            for key, value in payload.items():
+                if not isinstance(key, str):
+                    continue
+                column = key.upper()
+                if column in metadata:
+                    incoming[column] = value
+
+            if not incoming:
+                return {"msg": "Nenhuma coluna valida para insercao."}, 400
+
+            if "DATPROCESSAMENTO" not in incoming:
+                incoming["DATPROCESSAMENTO"] = datetime.now()
+            if "SEQUENCIA" in incoming and "SEQ" not in incoming:
+                incoming["SEQ"] = incoming["SEQUENCIA"]
+
+            normalized = OrderedDict()
+            for column, value in incoming.items():
+                try:
+                    normalized[column] = normalize_bind_value(column, value, metadata.get(column))
+                except ValueError as exc:
+                    return {"msg": f"Valor invalido para {column}: {exc}"}, 400
+
+            required_columns = [col for col, info in metadata.items() if not info.get("nullable")]
+            missing = [col for col in required_columns if normalized.get(col) is None]
+            if missing:
+                log.debug(f"Campos obrigatorios ausentes: {missing}")
+                return {"msg": "Preencha os campos obrigatorios antes de salvar.", "missing": missing}, 400
+
+            ordered_columns = [col for col in metadata.keys() if col in normalized]
+            normalized = OrderedDict((col, normalized[col]) for col in ordered_columns)
+
+            col_names = ", ".join(normalized.keys())
+            binds = ", ".join(f":{col}" for col in normalized.keys())
+            sql = f"INSERT INTO {app.config['ORACLE_TABLE_CLIENTES']} ({col_names}) VALUES ({binds})"
 
             with get_oracle_conn() as conn:
                 cur = conn.cursor()
-                col_names = ", ".join(valid.keys())
-                binds = ", ".join([f":{k}" for k in valid.keys()])
-                sql = f"INSERT INTO {app.config['ORACLE_TABLE_CLIENTES']} ({col_names}) VALUES ({binds})"
-                cur.execute(sql, valid)
+                cur.execute(sql, normalized)
                 conn.commit()
 
             return {"msg": "Cliente cadastrado com sucesso!"}, 201

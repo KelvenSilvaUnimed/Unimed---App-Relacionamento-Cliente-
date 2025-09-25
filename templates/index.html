@@ -205,7 +205,14 @@
 
       // ------------------ Campos e regras ------------------
       const CAMPOS_OBRIGATORIOS = [
-        "MATRICULA","COMPETENCIA_PAGAMENTO","ITEM_COD","VALOR","COMPETENCIA_PROCESSAMENTO",
+        "DATPROCESSAMENTO","CONTRATO","MATRICULA","COMPETENCIA_PAGAMENTO","GUIA_COD_ID",
+        "ITEM_COD","VALOR","SEQ","QTDE","SEQUENCIA","VAL_FAT","FAT_NRO",
+        "UNI_COD_RESPON","COD_CNTRAT_CART","COD","COD_DEPNTE","PARAMETRO_INT","PARAMETRO_LOC",
+        "BENEFICIARIO","ITEM_DESCRI","COMPETENCIA_PROCESSAMENTO","DATA_EXECUCAO","IDADE",
+      ];
+
+      const CAMPOS_RESET = [
+        "DATPROCESSAMENTO","COMPETENCIA_PAGAMENTO","ITEM_COD","VALOR","COMPETENCIA_PROCESSAMENTO",
         "DATA_EXECUCAO","IDADE","UNI_COD_RESPON","COD_CNTRAT_CART","COD","COD_DEPNTE",
         "BENEFICIARIO","ITEM_DESCRI",
       ];
@@ -216,6 +223,7 @@
         { id:"TIPO_ATENDIMENTO", label:"Tipo Atendimento", type:"text", readOnly:false, prefill:true },
         { id:"COD", label:"Cód", type:"text", readOnly:false, prefill:true },
         { id:"STATUS", label:"Status", type:"text", readOnly:false, prefill:true },
+        { id:"DATPROCESSAMENTO", label:"Data Processamento", type:"date", prefill:false },
         { id:"CONTRATO", label:"Contrato", type:"text", prefill:true },
         { id:"COMPETENCIA_PAGAMENTO", label:"Competência Pagamento", type:"text", prefill:false },
         { id:"GUIA_COD_ID", label:"Guia Cod ID", type:"text", prefill:true },
@@ -229,7 +237,7 @@
         { id:"COMPETENCIA_PROCESSAMENTO", label:"Competência Processamento", type:"text", prefill:false },
         { id:"GUCID_COD_CID", label:"GUCID Cod CID", type:"text", prefill:true },
         { id:"TP_ITEM", label:"TP Item", type:"text", prefill:true },
-        { id:"SEQ", label:"Seq", type:"text", prefill:true },
+        { id:"SEQ", label:"Seq", type:"text", readOnly:true, prefill:true },
         { id:"DATA_EXECUCAO", label:"Data de Execução", type:"date", prefill:false },
         { id:"QTDE", label:"Qtde", type:"text", prefill:true },
         { id:"LOCALIDADE", label:"Localidade", type:"text", prefill:true },
@@ -390,7 +398,9 @@
             valor = dados[mapa] ?? mapa;
           }
           // 3) valores especiais
-          if (campo.id === "DATA_EXECUCAO" && !valor) valor = dataHoje;
+          if (campo.type === "date") {
+            valor = valor ? String(valor).split("T")[0] : dataHoje;
+          }
           if (campo.type === "number" && valor !== "" && valor !== null) valor = Number(valor);
 
           const requiredStar = isRequired ? `<span class="required-star">*</span>` : "";
@@ -423,11 +433,13 @@
 
           // Preenche SEQUENCIA com PROXIMA_SEQUENCIA quando vier da API
           if (dados.PROXIMA_SEQUENCIA !== undefined && dados.PROXIMA_SEQUENCIA !== null) {
-            dados.SEQUENCIA = String(dados.PROXIMA_SEQUENCIA);
+            const proxSeq = String(dados.PROXIMA_SEQUENCIA);
+            dados.SEQUENCIA = proxSeq;
+            dados.SEQ = proxSeq;
           }
 
-          // Zera campos obrigatórios (para usuário preencher), exceto MATRÍCULA e SEQUENCIA
-          CAMPOS_OBRIGATORIOS.forEach((k) => {
+          // Zera campos selecionados para novo preenchimento, exceto matrícula e sequência
+          CAMPOS_RESET.forEach((k) => {
             if (k !== "MATRICULA" && k !== "SEQUENCIA") {
               dados[k] = "";
             }
