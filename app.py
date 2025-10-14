@@ -2,7 +2,7 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_restful import Api, Resource
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from collections import OrderedDict
 from dotenv import load_dotenv
@@ -47,11 +47,16 @@ class Config:
     ORACLE_POOL_MIN = int(os.getenv("ORACLE_POOL_MIN", "1"))
     ORACLE_POOL_MAX = int(os.getenv("ORACLE_POOL_MAX", "5"))
     ORACLE_POOL_INC = int(os.getenv("ORACLE_POOL_INC", "1"))
-    ORACLE_CALL_TIMEOUT_MS = int(os.getenv("ORACLE_CALL_TIMEOUT_MS", "20000"))  # 20s padrão
+    ORACLE_CALL_TIMEOUT_MS = int(os.getenv("ORACLE_CALL_TIMEOUT_MS", "20000"))  # 20s
     ORACLE_STMT_CACHE = int(os.getenv("ORACLE_STMT_CACHE", "100"))
 
-    # Hint opcional para o índice de ordenação (ex.: "INDEX_DESC(u UNI0177_IDX_DTSEQ)")
+    # Hint opcional para o índice (ex.: "INDEX_DESC(u UNI0177_IDX_DTSEQ)")
     ORACLE_INDEX_HINT = os.getenv("ORACLE_INDEX_HINT", "").strip()
+
+    # Janela padrão dos clientes (reduz cardinalidade da consulta)
+    ORACLE_CLIENTES_DEFAULT_DAYS = int(os.getenv("ORACLE_CLIENTES_DEFAULT_DAYS", "90"))
+    # Janela menor usada no fallback automático
+    ORACLE_CLIENTES_FALLBACK_DAYS = int(os.getenv("ORACLE_CLIENTES_FALLBACK_DAYS", "7"))
 
     SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
 
@@ -175,7 +180,7 @@ def get_oracle_conn(call_timeout_ms: int | None = None):
         if call_timeout_ms:
             conn.callTimeout = int(call_timeout_ms)  # ms
         yield conn
-    except oracledb.Error as e:  # <-- captura genérica compatível
+    except oracledb.Error as e:
         msg = str(e)
         if "DPY-3001" in msg:
             log.error("Conexão rejeitada: NNE exigido (somente THICK).")
@@ -377,6 +382,12 @@ def _yyyy_mm_now():
     d = date.today()
     return f"{d.year}{d.month:02d}"
 
+def is_timeout_error(msg: str) -> bool:
+    if not msg:
+        return False
+    m = msg.lower()
+    return ("dpy-4024" in m) or ("dpi-1067" in m) or ("ora-03156" in m) or ("timeout" in m)
+
 # ====================================================================
 # REGRAS DE NEGÓCIO (DEFAULTS)
 # ====================================================================
@@ -531,6 +542,35 @@ class Login(Resource):
             return {"msg": f"Erro interno no login: {e}"}, 500
 
 class ListarClientes(Resource):
+    def _run_query(self, conn, limit: int, days: int, only_dt_order: bool, hint: str):
+        """
+        Executa a consulta filtrando por janela de dias e com ORDER BY ajustável.
+        """
+        cur = conn.cursor()
+        cur.prefetchrows = limit
+        cur.arraysize = limit
+
+        dt_min = datetime.now() - timedelta(days=max(1, days))
+        if only_dt_order:
+            order_clause = "ORDER BY DATPROCESSAMENTO DESC NULLS LAST"
+        else:
+            order_clause = "ORDER BY DATPROCESSAMENTO DESC NULLS LAST, SEQUENCIA DESC NULLS LAST"
+
+        sql = f"""
+            SELECT * FROM (
+                SELECT {hint}
+                       CONTRATO, MATRICULA, COMPETENCIA_PAGAMENTO, BENEFICIARIO, VALOR
+                FROM {app.config['ORACLE_TABLE_CLIENTES']} u
+                WHERE (:dt_min IS NULL OR u.DATPROCESSAMENTO >= :dt_min)
+                {order_clause}
+            )
+            WHERE ROWNUM <= :limit
+        """
+        cur.execute(sql, {"limit": limit, "dt_min": dt_min})
+        cols = [d[0] for d in cur.description]
+        rows = [row_to_dict(cols, r) for r in cur.fetchall()]
+        return rows
+
     def get(self):
         # limit
         try:
@@ -546,36 +586,47 @@ class ListarClientes(Resource):
         except ValueError:
             return {"msg": "Parâmetro 'timeout' inválido."}, 400
 
+        # janela (dias) — querystring ou default
+        try:
+            qs_days = request.args.get("days")
+            days = int(qs_days) if qs_days else app.config["ORACLE_CLIENTES_DEFAULT_DAYS"]
+        except ValueError:
+            return {"msg": "Parâmetro 'days' inválido."}, 400
+
         index_hint = app.config["ORACLE_INDEX_HINT"]
         hint = f"/*+ FIRST_ROWS({limit}) {index_hint} */" if index_hint else f"/*+ FIRST_ROWS({limit}) */"
 
         try:
             with get_oracle_conn(call_timeout_ms=timeout_ms) as conn:
-                cur = conn.cursor()
-                cur.prefetchrows = limit
-                cur.arraysize = limit
-
-                sql = f"""
-                    SELECT * FROM (
-                        SELECT {hint}
-                               CONTRATO, MATRICULA, COMPETENCIA_PAGAMENTO, BENEFICIARIO, VALOR
-                        FROM {app.config['ORACLE_TABLE_CLIENTES']} u
-                        ORDER BY DATPROCESSAMENTO DESC NULLS LAST, SEQUENCIA DESC NULLS LAST
-                    )
-                    WHERE ROWNUM <= :limit
-                """
-                cur.execute(sql, {"limit": limit})
-                cols = [d[0] for d in cur.description]
-                rows = [row_to_dict(cols, r) for r in cur.fetchall()]
-                log.info(f"/api/clientes -> limit={limit} retornados={len(rows)} timeout_ms={timeout_ms}")
+                # 1ª tentativa: janela solicitada e ORDER BY completo
+                rows = self._run_query(conn, limit, days, only_dt_order=False, hint=hint)
+                log.info(f"/api/clientes -> ok (limit={limit}, days={days}, timeout_ms={timeout_ms}, rows={len(rows)})")
                 return {"clientes": rows, "page": 1, "limit": limit, "total": 0}, 200
 
         except oracledb.Error as e:
             msg = str(e)
-            # Timeouts/cancelamentos típicos
-            if ("DPY-4024" in msg) or ("DPI-1067" in msg) or ("ORA-03156" in msg) or ("timeout" in msg.lower()):
-                log.warning(f"/api/clientes timeout/cancel: {msg}")
-                return {"msg": "Tempo excedido ao consultar o Oracle."}, 504
+            if is_timeout_error(msg):
+                log.warning(f"/api/clientes timeout@1st (days={days}): {msg}")
+                # Fallback automático: janela menor e ORDER BY somente por data
+                try:
+                    with get_oracle_conn(call_timeout_ms=timeout_ms) as conn:
+                        fb_days = app.config["ORACLE_CLIENTES_FALLBACK_DAYS"]
+                        rows = self._run_query(conn, limit, fb_days, only_dt_order=True, hint=hint)
+                        log.info(f"/api/clientes -> fallback ok (limit={limit}, days={fb_days}, rows={len(rows)})")
+                        return {
+                            "clientes": rows,
+                            "page": 1,
+                            "limit": limit,
+                            "note": f"Fallback aplicado (days={fb_days}).",
+                        }, 206  # 206 Partial Content para indicar fallback
+                except oracledb.Error as e2:
+                    msg2 = str(e2)
+                    if is_timeout_error(msg2):
+                        log.warning(f"/api/clientes timeout@fallback: {msg2}")
+                        return {"msg": "Tempo excedido ao consultar o Oracle."}, 504
+                    log.exception("Erro no fallback de /api/clientes")
+                    return {"msg": f"Erro ao buscar clientes (fallback): {msg2}"}, 500
+            # erro não relacionado a timeout
             log.exception("Erro ao listar clientes")
             return {"msg": f"Erro ao buscar clientes no Oracle: {msg}"}, 500
         except Exception as e:
@@ -634,7 +685,7 @@ class BuscarUltimoCadastro(Resource):
 
         except oracledb.Error as e:
             msg = str(e)
-            if ("DPY-4024" in msg) or ("DPI-1067" in msg) or ("ORA-03156" in msg) or ("timeout" in msg.lower()):
+            if is_timeout_error(msg):
                 return {"msg": "Tempo excedido ao consultar o Oracle."}, 504
             log.exception("Erro no último cadastro")
             return {"msg": f"Erro ao buscar cadastro: {msg}"}, 500
@@ -703,7 +754,7 @@ class CadastrarCliente(Resource):
 
         except oracledb.Error as e:
             msg = str(e)
-            if ("DPY-4024" in msg) or ("DPI-1067" in msg) or ("ORA-03156" in msg) or ("timeout" in msg.lower()):
+            if is_timeout_error(msg):
                 return {"msg": "Tempo excedido ao salvar no Oracle."}, 504
             log.exception("Erro ao cadastrar cliente")
             return {"msg": f"Erro ao salvar cliente no Oracle: {msg}"}, 500
