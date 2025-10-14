@@ -1,3 +1,4 @@
+# app.py
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_restful import Api, Resource
 from contextlib import contextmanager
@@ -5,8 +6,11 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from collections import OrderedDict
 from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
 import logging
 import os
+import sys
+import platform
 import sqlite3
 import oracledb
 
@@ -19,7 +23,7 @@ logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 log = logging.getLogger("app")
 
 # ====================================================================
-# CONFIG (mínima)
+# CONFIG
 # ====================================================================
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev_change_me")
@@ -36,7 +40,22 @@ class Config:
     ORACLE_THICK_LIB_DIR = os.getenv("ORACLE_THICK_LIB_DIR", "")
 
     ORACLE_TABLE_CLIENTES = os.getenv("ORACLE_TABLE_CLIENTES", "uni0177_tbtipoguia_comp")
+
     MAX_PAGE_SIZE = int(os.getenv("MAX_PAGE_SIZE", "100"))
+
+    # Pool / desempenho / timeouts
+    ORACLE_POOL_MIN = int(os.getenv("ORACLE_POOL_MIN", "1"))
+    ORACLE_POOL_MAX = int(os.getenv("ORACLE_POOL_MAX", "5"))
+    ORACLE_POOL_INC = int(os.getenv("ORACLE_POOL_INC", "1"))
+    ORACLE_CALL_TIMEOUT_MS = int(os.getenv("ORACLE_CALL_TIMEOUT_MS", "20000"))  # 20s padrão
+    ORACLE_STMT_CACHE = int(os.getenv("ORACLE_STMT_CACHE", "100"))
+
+    # Hint opcional para o índice de ordenação (ex.: "INDEX_DESC(u UNI0177_IDX_DTSEQ)")
+    ORACLE_INDEX_HINT = os.getenv("ORACLE_INDEX_HINT", "").strip()
+
+    SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
+
+REQUIRE_ORACLE_THICK = True
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -45,61 +64,161 @@ api = Api(app)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=app.config["SESSION_COOKIE_SECURE"],
 )
 
-# ====================================================================
-# ORACLE: THICK + DSN + contextmanager
-# ====================================================================
-if app.config["ORACLE_THICK_LIB_DIR"]:
-    try:
-        oracledb.init_oracle_client(lib_dir=app.config["ORACLE_THICK_LIB_DIR"])
-        log.info("Oracle client THICK habilitado.")
-    except Exception as e:
-        log.warning(f"Falha ao iniciar Oracle THICK: {e}. Tentará modo THIN.")
+@app.after_request
+def _sec_headers(resp):
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "SAMEORIGIN"
+    return resp
 
+# ====================================================================
+# Helpers ENV
+# ====================================================================
+def _strip_quotes(s: str | None) -> str | None:
+    if not s:
+        return s
+    s = s.strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        return s[1:-1]
+    return s
+
+def _norm_path_env(var: str) -> str:
+    raw = os.getenv(var, "")
+    raw = _strip_quotes(raw) or ""
+    return os.path.normpath(os.path.expandvars(raw)) if raw else ""
+
+# ====================================================================
+# ORACLE THICK: init obrigatório
+# ====================================================================
+def _assert_64bit():
+    arch, _ = platform.architecture()
+    if arch != "64bit":
+        raise RuntimeError("Python precisa ser 64-bit para usar Oracle Client 64-bit (THICK).")
+
+def _instant_client_probe(lib_dir: str):
+    if not lib_dir or not os.path.isdir(lib_dir):
+        raise RuntimeError(
+            "ORACLE_THICK_LIB_DIR não configurado ou pasta inválida. "
+            "Defina a pasta do Instant Client 64-bit (ex.: C:\\oracle\\instantclient_23_9)."
+        )
+    if os.name == "nt":
+        oci = os.path.join(lib_dir, "oci.dll")
+        if not os.path.isfile(oci):
+            raise RuntimeError(
+                f"Instant Client inválido: não encontrei oci.dll em '{lib_dir}'. "
+                "Aponte para a subpasta instantclient_XX_X."
+            )
+        try:
+            os.add_dll_directory(lib_dir)
+        except Exception:
+            pass
+        if lib_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = lib_dir + os.pathsep + os.environ.get("PATH", "")
+    elif sys.platform.startswith("linux"):
+        so = os.path.join(lib_dir, "libclntsh.so")
+        if not os.path.isfile(so):
+            raise RuntimeError(f"Instant Client inválido: não encontrei libclntsh.so em '{lib_dir}'.")
+    elif sys.platform == "darwin":
+        dylib = os.path.join(lib_dir, "libclntsh.dylib")
+        if not os.path.isfile(dylib):
+            raise RuntimeError(f"Instant Client inválido: não encontrei libclntsh.dylib em '{lib_dir}'.")
+
+def _init_oracle_thick_or_fail():
+    _assert_64bit()
+    lib_dir = _norm_path_env("ORACLE_THICK_LIB_DIR") or app.config["ORACLE_THICK_LIB_DIR"]
+    lib_dir = _strip_quotes(lib_dir) or ""
+    _instant_client_probe(lib_dir)
+
+    net_admin = _strip_quotes(os.getenv("ORACLE_NET_ADMIN") or "")
+    try:
+        if net_admin and os.path.isdir(net_admin):
+            oracledb.init_oracle_client(lib_dir=lib_dir, config_dir=net_admin)
+        else:
+            oracledb.init_oracle_client(lib_dir=lib_dir)
+        log.info(f"Oracle THICK habilitado (lib_dir={lib_dir}, net_admin={net_admin or 'None'}).")
+    except Exception as e:
+        raise RuntimeError(
+            f"Falha ao iniciar Oracle THICK: {e}. Cheque Instant Client 64-bit, oci.dll e Microsoft VC++ x64."
+        ) from e
+
+if REQUIRE_ORACLE_THICK:
+    _init_oracle_thick_or_fail()
+
+# ====================================================================
+# DSN + POOL + contextmanager
+# ====================================================================
 ORACLE_DSN = oracledb.makedsn(
     host=app.config["ORACLE_HOST"],
     port=app.config["ORACLE_PORT"],
     service_name=app.config["ORACLE_SERVICE"],
 )
 
+POOL = oracledb.create_pool(
+    user=app.config["ORACLE_USER"],
+    password=app.config["ORACLE_PASSWORD"],
+    dsn=ORACLE_DSN,
+    min=app.config["ORACLE_POOL_MIN"],
+    max=app.config["ORACLE_POOL_MAX"],
+    increment=app.config["ORACLE_POOL_INC"],
+    homogeneous=True,
+    timeout=60,
+    stmtcachesize=app.config["ORACLE_STMT_CACHE"],
+)
+
 @contextmanager
-def get_oracle_conn():
+def get_oracle_conn(call_timeout_ms: int | None = None):
     conn = None
     try:
-        conn = oracledb.connect(
-            user=app.config["ORACLE_USER"],
-            password=app.config["ORACLE_PASSWORD"],
-            dsn=ORACLE_DSN,
-        )
+        conn = POOL.acquire()
+        if call_timeout_ms:
+            conn.callTimeout = int(call_timeout_ms)  # ms
         yield conn
+    except oracledb.Error as e:  # <-- captura genérica compatível
+        msg = str(e)
+        if "DPY-3001" in msg:
+            log.error("Conexão rejeitada: NNE exigido (somente THICK).")
+        log.exception("Falha Oracle (get_oracle_conn).")
+        raise
     finally:
         if conn:
-            try: conn.close()
-            except: pass
+            try:
+                conn.close()
+            except:
+                pass
 
-# cache de colunas
+# ====================================================================
+# ORACLE: COLUNAS & METADADOS
+# ====================================================================
 _ORACLE_TABLE_COLUMNS = []
+_ORACLE_TABLE_METADATA = OrderedDict()
+
+def _split_owner_table(ref: str):
+    if not ref:
+        return None, None
+    parts = ref.split(".")
+    if len(parts) == 2:
+        return parts[0].upper(), parts[1].upper()
+    return None, ref.upper()
 
 def get_oracle_table_columns():
     global _ORACLE_TABLE_COLUMNS
     if _ORACLE_TABLE_COLUMNS:
         return _ORACLE_TABLE_COLUMNS
     try:
-        with get_oracle_conn() as conn:
+        with get_oracle_conn(call_timeout_ms=5000) as conn:
             cur = conn.cursor()
+            cur.prefetchrows = 1
+            cur.arraysize = 1
             cur.execute(f"SELECT * FROM {app.config['ORACLE_TABLE_CLIENTES']} WHERE ROWNUM = 1")
             _ORACLE_TABLE_COLUMNS = [c[0] for c in (cur.description or [])]
             if not _ORACLE_TABLE_COLUMNS:
-                log.warning("Nenhuma coluna encontrada (tabela vazia?).")
+                log.warning("Nenhuma coluna encontrada na tabela Oracle (tabela vazia?).")
     except Exception as e:
         log.error(f"Erro ao buscar colunas Oracle: {e}")
         _ORACLE_TABLE_COLUMNS = []
     return _ORACLE_TABLE_COLUMNS
-
-
-_ORACLE_TABLE_METADATA = OrderedDict()
-
 
 def get_oracle_table_metadata():
     global _ORACLE_TABLE_METADATA
@@ -109,27 +228,27 @@ def get_oracle_table_metadata():
     owner, table = _split_owner_table(app.config['ORACLE_TABLE_CLIENTES'])
     meta = OrderedDict()
     try:
-        with get_oracle_conn() as conn:
+        with get_oracle_conn(call_timeout_ms=8000) as conn:
             cur = conn.cursor()
             if owner:
                 cur.execute(
                     """
-                        SELECT column_name, data_type, data_precision, data_scale, nullable, column_id
-                        FROM all_tab_columns
-                        WHERE owner = :owner AND table_name = :table
-                        ORDER BY column_id
+                    SELECT column_name, data_type, data_precision, data_scale, nullable, column_id
+                    FROM all_tab_columns
+                    WHERE owner = :p_owner AND table_name = :p_table
+                    ORDER BY column_id
                     """,
-                    {"owner": owner, "table": table},
+                    {"p_owner": owner, "p_table": table},
                 )
             else:
                 cur.execute(
                     """
-                        SELECT column_name, data_type, data_precision, data_scale, nullable, column_id
-                        FROM user_tab_columns
-                        WHERE table_name = :table
-                        ORDER BY column_id
+                    SELECT column_name, data_type, data_precision, data_scale, nullable, column_id
+                    FROM user_tab_columns
+                    WHERE table_name = :p_table
+                    ORDER BY column_id
                     """,
-                    {"table": table},
+                    {"p_table": table},
                 )
             for name, dtype, precision, scale, nullable, col_id in cur:
                 meta[name.upper()] = {
@@ -146,11 +265,12 @@ def get_oracle_table_metadata():
     _ORACLE_TABLE_METADATA = meta
     return _ORACLE_TABLE_METADATA
 
-
+# ====================================================================
+# NORMALIZAÇÃO DE VALORES
+# ====================================================================
 def normalize_bind_value(column, value, meta):
     if meta is None:
         return value
-
     if value is None:
         return None
 
@@ -165,7 +285,7 @@ def normalize_bind_value(column, value, meta):
     if dtype in {"CHAR", "NCHAR", "VARCHAR2", "NVARCHAR2", "CLOB"}:
         return str(value)
 
-    if dtype == "DATE":
+    if dtype in {"DATE", "TIMESTAMP", "TIMESTAMP(6)", "TIMESTAMP WITH TIME ZONE", "TIMESTAMP WITH LOCAL TIME ZONE"}:
         if isinstance(value, datetime):
             return value
         if isinstance(value, date):
@@ -198,41 +318,7 @@ def normalize_bind_value(column, value, meta):
     return value
 
 # ====================================================================
-# ORACLE helpers
-# ====================================================================
-def _split_owner_table(ref: str):
-    """Retorna (owner, table) a partir de "OWNER.TABLE" ou (None, ref) se sem owner."""
-    if not ref:
-        return None, None
-    parts = ref.split('.')
-    if len(parts) == 2:
-        return parts[0].upper(), parts[1].upper()
-    return None, ref.upper()
-
-def get_table_rowcount_estimate(conn, table_ref: str):
-    """Tenta obter contagem estimada via estatística (ALL_TABLES/USER_TABLES). Retorna int ou None."""
-    owner, table = _split_owner_table(table_ref)
-    cur = conn.cursor()
-    try:
-        if owner:
-            cur.execute("""
-                SELECT num_rows FROM all_tables
-                WHERE owner = :1 AND table_name = :2
-            """, (owner, table))
-        else:
-            cur.execute("""
-                SELECT num_rows FROM user_tables
-                WHERE table_name = :1
-            """, (table,))
-        row = cur.fetchone()
-        if row and row[0] is not None:
-            return int(row[0])
-    except Exception as _:
-        pass
-    return None
-
-# ====================================================================
-# SQLITE
+# SQLITE (USUÁRIOS)
 # ====================================================================
 def _resolve_sqlite_path():
     raw = app.config["SQLITE_DB_PATH"]
@@ -269,9 +355,10 @@ create_user_table()
 # ====================================================================
 def sanitize(value):
     if isinstance(value, Decimal):
-        # evita NaN/Infinity no JSON
-        try: return float(value)
-        except: return None
+        try:
+            return float(value)
+        except:
+            return None
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     return value
@@ -279,12 +366,92 @@ def sanitize(value):
 def row_to_dict(columns, row):
     return {col: sanitize(val) for col, val in zip(columns, row)}
 
-def normalize_remocao(expr_col="TIPO_ATENDIMENTO"):
-    return f"REPLACE(REPLACE(REPLACE(UPPER({expr_col}),'Ç','C'),'Ã','A'),'Õ','O')"
-
 def require_login():
     if 'user_id' not in session:
         return {"msg": "Usuário não autenticado."}, 401
+
+def _today_yyyy_mm_dd():
+    return date.today().isoformat()
+
+def _yyyy_mm_now():
+    d = date.today()
+    return f"{d.year}{d.month:02d}"
+
+# ====================================================================
+# REGRAS DE NEGÓCIO (DEFAULTS)
+# ====================================================================
+BUSINESS_DEFAULTS = {
+    "TIPO_ATENDIMENTO": "REMOCAO",
+    "STATUS": None,
+    "DATPROCESSAMENTO": _today_yyyy_mm_dd,
+    "COMPETENCIA_PAGAMENTO": None,
+    "TP_GUIA": "P",
+    "ITEM_COD": None,
+    "TIP_GUIA": "REMOCAO",
+    "DEMONSTRATIVO_FATURA": None,
+    "COMPETENCIA_PROCESSAMENTO": _yyyy_mm_now,
+    "GUCID_COD_CID": None,
+    "TP_ITEM": "Taxa",
+    "SEQ": 1,
+    "DATA_EXECUCAO": _today_yyyy_mm_dd,
+    "LOCALIDADE": "LOCAL",
+    "GRUPO_FREQUENCIA": None,
+    "PREST_PAG": None,
+    "TIP_FOR": "REM",
+    "ITEM_DESCRI": None,
+    "NM_SOLIC": None,
+    "NC": "S",
+    "TIPO_LANCAMENTO": "PRODUCAO - REMOCAO",
+    "CAPITULO": "TAXA",
+    "GRUPO": "TAXA",
+    "SUBGRUPO": "TAXA",
+    "TIPO_ACOMODACAO": None,
+    "PARTICIPACAO": "SEM PARTICIPACAO",
+    "UNIMED": "LOCAL",
+    "CBO_EXEC_NRO": None,
+    "CBO_SOLIC_NRO": None,
+    "VAL_FAT": 0,
+    "FAT_NRO": 0,
+    "COD_PREST_PAGTO": None,
+    "UNI_COD_RESPON": 177,
+    "GUITE_NRO_SENHA_SOLIT": None,
+    "PRESTADOR_EXECUTANTE_ITEM": None,
+    "PARAMETRO_INT": None,
+    "PARAMETRO_LOC": None,
+    "CPFCNPJ_EXEC": None,
+    "CPFCNPJ_SOL": None,
+    "OBSERVACO": None,
+    "ORIGEM_REDE": "OUTRA OPERADORA",
+    "CARATER_ATENDIMENTO": "E",
+}
+
+def apply_business_defaults(record: dict) -> dict:
+    out = dict(record or {})
+    for key, default in BUSINESS_DEFAULTS.items():
+        if key not in out or out[key] in ("", None):
+            out[key] = default() if callable(default) else default
+
+    if "SEQUENCIA" not in out and out.get("PROXIMA_SEQUENCIA") is not None:
+        try:
+            out["SEQUENCIA"] = int(out["PROXIMA_SEQUENCIA"])
+        except Exception:
+            pass
+
+    out["SEQ"] = 1
+
+    for k in ("DATPROCESSAMENTO", "DATA_EXECUCAO"):
+        if out.get(k):
+            out[k] = str(out[k]).split("T")[0]
+    return out
+
+def get_next_global_sequence(conn) -> int:
+    cur = conn.cursor()
+    cur.execute(f"SELECT NVL(MAX(SEQUENCIA),0) + 1 FROM {app.config['ORACLE_TABLE_CLIENTES']}")
+    row = cur.fetchone()
+    try:
+        return int(row[0]) if row and row[0] is not None else 1
+    except Exception:
+        return 1
 
 # ====================================================================
 # ROTAS HTML
@@ -324,9 +491,11 @@ class UserRegister(Resource):
                 cur = conn.cursor()
                 if cur.execute("SELECT 1 FROM usuarios WHERE login = ?", (data['login'],)).fetchone():
                     return {"msg": "Erro: Login já existe."}, 409
+
+                senha_hash = generate_password_hash(data['senha'])
                 cur.execute(
                     "INSERT INTO usuarios (nome, login, email, senha, funcao) VALUES (?, ?, ?, ?, ?)",
-                    (data['nome'], data['login'], data['email'], data['senha'], data['funcao'])
+                    (data['nome'], data['login'], data['email'], senha_hash, data['funcao'])
                 )
                 conn.commit()
             return {"msg": "Usuário cadastrado com sucesso!"}, 201
@@ -341,9 +510,19 @@ class Login(Resource):
             return {"msg": "Login e senha são obrigatórios."}, 400
         try:
             with get_sqlite_db() as conn:
-                user = conn.execute("SELECT id, nome, senha FROM usuarios WHERE login = ?", (data["login"],)).fetchone()
-                if not user or user["senha"] != data["senha"]:
+                user = conn.execute(
+                    "SELECT id, nome, senha FROM usuarios WHERE login = ?",
+                    (data["login"],)
+                ).fetchone()
+
+                if not user:
                     return {"msg": "Usuário ou senha inválidos."}, 401
+
+                senha_db = user["senha"]
+                ok = check_password_hash(senha_db, data["senha"]) if senha_db.startswith("pbkdf2:") else (senha_db == data["senha"])
+                if not ok:
+                    return {"msg": "Usuário ou senha inválidos."}, 401
+
                 session["user_id"] = user["id"]
                 session["user_name"] = user["nome"]
                 return {"msg": "Login realizado com sucesso."}, 200
@@ -353,63 +532,74 @@ class Login(Resource):
 
 class ListarClientes(Resource):
     def get(self):
-        # Versão simples: sem autenticação e sem paginação custosa
+        # limit
         try:
             limit_req = int(request.args.get("limit", 10))
             limit = min(app.config["MAX_PAGE_SIZE"], max(1, limit_req))
         except ValueError:
             return {"msg": "Parâmetro 'limit' inválido."}, 400
 
+        # timeout por request (ms) ou default
         try:
-            with get_oracle_conn() as conn:
+            req_timeout = request.args.get("timeout")
+            timeout_ms = int(req_timeout) if req_timeout else app.config["ORACLE_CALL_TIMEOUT_MS"]
+        except ValueError:
+            return {"msg": "Parâmetro 'timeout' inválido."}, 400
+
+        index_hint = app.config["ORACLE_INDEX_HINT"]
+        hint = f"/*+ FIRST_ROWS({limit}) {index_hint} */" if index_hint else f"/*+ FIRST_ROWS({limit}) */"
+
+        try:
+            with get_oracle_conn(call_timeout_ms=timeout_ms) as conn:
                 cur = conn.cursor()
+                cur.prefetchrows = limit
+                cur.arraysize = limit
 
-                # Simples: retorna os primeiros N registros sem COUNT(*)
                 sql = f"""
-                    SELECT CONTRATO, MATRICULA, COMPETENCIA_PAGAMENTO, BENEFICIARIO, VALOR
-                    FROM (
-                        SELECT CONTRATO, MATRICULA, COMPETENCIA_PAGAMENTO, BENEFICIARIO, VALOR
-                        FROM {app.config['ORACLE_TABLE_CLIENTES']}
+                    SELECT * FROM (
+                        SELECT {hint}
+                               CONTRATO, MATRICULA, COMPETENCIA_PAGAMENTO, BENEFICIARIO, VALOR
+                        FROM {app.config['ORACLE_TABLE_CLIENTES']} u
+                        ORDER BY DATPROCESSAMENTO DESC NULLS LAST, SEQUENCIA DESC NULLS LAST
                     )
-                    WHERE ROWNUM <= :1
+                    WHERE ROWNUM <= :limit
                 """
-                cur.execute(sql, (limit,))
-
+                cur.execute(sql, {"limit": limit})
                 cols = [d[0] for d in cur.description]
                 rows = [row_to_dict(cols, r) for r in cur.fetchall()]
-
-                log.info(f"/api/clientes -> limit={limit} retornados={len(rows)}")
-
-                # Mantém chaves esperadas pelo front; 'total' zerado esconde paginação
+                log.info(f"/api/clientes -> limit={limit} retornados={len(rows)} timeout_ms={timeout_ms}")
                 return {"clientes": rows, "page": 1, "limit": limit, "total": 0}, 200
 
+        except oracledb.Error as e:
+            msg = str(e)
+            # Timeouts/cancelamentos típicos
+            if ("DPY-4024" in msg) or ("DPI-1067" in msg) or ("ORA-03156" in msg) or ("timeout" in msg.lower()):
+                log.warning(f"/api/clientes timeout/cancel: {msg}")
+                return {"msg": "Tempo excedido ao consultar o Oracle."}, 504
+            log.exception("Erro ao listar clientes")
+            return {"msg": f"Erro ao buscar clientes no Oracle: {msg}"}, 500
         except Exception as e:
             log.exception("Erro ao listar clientes")
             return {"msg": f"Erro ao buscar clientes no Oracle: {e}"}, 500
 
 class BuscarUltimoCadastro(Resource):
     def get(self):
-        # Versão simples: não exige autenticação
-
         matricula = request.args.get("matricula")
         if not matricula:
             return {"msg": "Matrícula não fornecida."}, 400
 
         try:
-            with get_oracle_conn() as conn:
+            with get_oracle_conn(call_timeout_ms=app.config["ORACLE_CALL_TIMEOUT_MS"]) as conn:
                 cur = conn.cursor()
-
-                # Query: busca o último cadastro da matrícula priorizando casos de remoção e calcula a próxima sequência global
-
                 sql = f"""
                     WITH CANDIDATOS AS (
                         SELECT u.*,
                                ROW_NUMBER() OVER (
                                    ORDER BY
                                        CASE
-                                           WHEN TRANSLATE(UPPER(TRIM(u.TIPO_ATENDIMENTO)), UNISTR('\\00C7\\00C3\\00C2\\00C1\\00C0\\00D5'), 'CAAAAO') = 'REMOCAO' THEN 0
-                                           ELSE 1
-                                       END,
+                                         WHEN TRANSLATE(UPPER(TRIM(u.TIPO_ATENDIMENTO)),
+                                             UNISTR('\\00C7\\00C3\\00C2\\00C1\\00C0\\00D5'), 'CAAAAO') = 'REMOCAO'
+                                         THEN 0 ELSE 1 END,
                                        u.COMPETENCIA_PROCESSAMENTO DESC NULLS LAST,
                                        u.SEQUENCIA DESC NULLS LAST
                                ) AS RN
@@ -417,35 +607,37 @@ class BuscarUltimoCadastro(Resource):
                         WHERE u.MATRICULA = :matricula
                     ),
                     MAX_GERAL AS (
-                        SELECT MAX(SEQUENCIA) AS SEQUENCIA_GERAL FROM {app.config['ORACLE_TABLE_CLIENTES']}
+                        SELECT MAX(SEQUENCIA) AS SEQUENCIA_GERAL
+                        FROM {app.config['ORACLE_TABLE_CLIENTES']}
                     )
                     SELECT
                         NVL(MAX_GERAL.SEQUENCIA_GERAL, 0) AS SEQUENCIA_GERAL,
                         NVL(MAX_GERAL.SEQUENCIA_GERAL, 0) + 1 AS PROXIMA_SEQUENCIA,
                         ULTIMO.*
                     FROM MAX_GERAL
-                    LEFT JOIN (
-                        SELECT * FROM CANDIDATOS WHERE RN = 1
-                    ) ULTIMO ON 1 = 1
+                    LEFT JOIN (SELECT * FROM CANDIDATOS WHERE RN = 1) ULTIMO ON 1 = 1
                 """
+                cur.prefetchrows = 2
+                cur.arraysize = 2
                 cur.execute(sql, {"matricula": matricula})
                 row = cur.fetchone()
 
                 data = {"MATRICULA": matricula}
-                tem_cadastro = False
                 if row:
                     cols = [d[0] for d in cur.description]
                     row_dict = row_to_dict(cols, row)
                     data.update(row_dict)
-                    tem_cadastro = any(
-                        row_dict.get(col) is not None
-                        for col in row_dict
-                        if col not in {"SEQUENCIA_GERAL", "PROXIMA_SEQUENCIA"}
-                    )
 
-                msg = "Dados encontrados." if tem_cadastro else "Nenhum cadastro anterior encontrado para esta matrícula."
+                data = apply_business_defaults({k.upper(): v for k, v in data.items()})
+                msg = "Dados encontrados." if len(data.keys()) > 0 else "Nenhum cadastro anterior."
                 return {"msg": msg, "data": data}, 200
 
+        except oracledb.Error as e:
+            msg = str(e)
+            if ("DPY-4024" in msg) or ("DPI-1067" in msg) or ("ORA-03156" in msg) or ("timeout" in msg.lower()):
+                return {"msg": "Tempo excedido ao consultar o Oracle."}, 504
+            log.exception("Erro no último cadastro")
+            return {"msg": f"Erro ao buscar cadastro: {msg}"}, 500
         except Exception as e:
             log.exception("Erro no último cadastro")
             return {"msg": f"Erro ao buscar cadastro: {e}"}, 500
@@ -453,7 +645,8 @@ class BuscarUltimoCadastro(Resource):
 class CadastrarCliente(Resource):
     def post(self):
         auth = require_login()
-        if auth: return auth
+        if auth:
+            return auth
 
         payload = request.get_json(silent=True) or {}
         if not payload:
@@ -468,17 +661,18 @@ class CadastrarCliente(Resource):
             for key, value in payload.items():
                 if not isinstance(key, str):
                     continue
-                column = key.upper()
-                if column in metadata:
-                    incoming[column] = value
+                col = key.upper()
+                if col in metadata:
+                    incoming[col] = value
 
-            if not incoming:
-                return {"msg": "Nenhuma coluna valida para insercao."}, 400
+            incoming = apply_business_defaults(incoming)
 
-            if "DATPROCESSAMENTO" not in incoming:
-                incoming["DATPROCESSAMENTO"] = datetime.now()
-            if "SEQUENCIA" in incoming and "SEQ" not in incoming:
-                incoming["SEQ"] = incoming["SEQUENCIA"]
+            if "SEQUENCIA" not in incoming or incoming["SEQUENCIA"] in ("", None):
+                with get_oracle_conn(call_timeout_ms=app.config["ORACLE_CALL_TIMEOUT_MS"]) as conn:
+                    incoming["SEQUENCIA"] = get_next_global_sequence(conn)
+
+            if "DATPROCESSAMENTO" not in incoming or incoming["DATPROCESSAMENTO"] in ("", None):
+                incoming["DATPROCESSAMENTO"] = _today_yyyy_mm_dd()
 
             normalized = OrderedDict()
             for column, value in incoming.items():
@@ -500,13 +694,19 @@ class CadastrarCliente(Resource):
             binds = ", ".join(f":{col}" for col in normalized.keys())
             sql = f"INSERT INTO {app.config['ORACLE_TABLE_CLIENTES']} ({col_names}) VALUES ({binds})"
 
-            with get_oracle_conn() as conn:
+            with get_oracle_conn(call_timeout_ms=app.config["ORACLE_CALL_TIMEOUT_MS"]) as conn:
                 cur = conn.cursor()
                 cur.execute(sql, normalized)
                 conn.commit()
 
             return {"msg": "Cliente cadastrado com sucesso!"}, 201
 
+        except oracledb.Error as e:
+            msg = str(e)
+            if ("DPY-4024" in msg) or ("DPI-1067" in msg) or ("ORA-03156" in msg) or ("timeout" in msg.lower()):
+                return {"msg": "Tempo excedido ao salvar no Oracle."}, 504
+            log.exception("Erro ao cadastrar cliente")
+            return {"msg": f"Erro ao salvar cliente no Oracle: {msg}"}, 500
         except Exception as e:
             log.exception("Erro ao cadastrar cliente")
             return {"msg": f"Erro ao salvar cliente no Oracle: {e}"}, 500
@@ -522,22 +722,40 @@ api.add_resource(BuscarUltimoCadastro, '/api/ultimo-cadastro-por-matricula')
 
 @app.route("/healthz")
 def healthz():
+    info = {
+        "sqlite_ok": False,
+        "oracle_ok": False,
+        "thick": None,
+        "clientversion": None,
+        "dsn": f"{app.config['ORACLE_HOST']}:{app.config['ORACLE_PORT']}/{app.config['ORACLE_SERVICE']}",
+        "pool": {
+            "min": app.config["ORACLE_POOL_MIN"],
+            "max": app.config["ORACLE_POOL_MAX"],
+            "inc": app.config["ORACLE_POOL_INC"],
+            "stmt_cache": app.config["ORACLE_STMT_CACHE"],
+        }
+    }
     try:
-        with get_sqlite_db() as c: c.execute("SELECT 1")
-        with get_oracle_conn() as conn:
-            cur = conn.cursor(); cur.execute("SELECT 1 FROM DUAL")
-        return jsonify({"ok": True})
+        with get_sqlite_db() as c:
+            c.execute("SELECT 1")
+        info["sqlite_ok"] = True
     except Exception as e:
-        return jsonify({"ok": False, "err": str(e)}), 500
+        return jsonify({"ok": False, "where": "sqlite", "err": str(e), "info": info}), 500
+
+    try:
+        cv = oracledb.clientversion()
+        info["clientversion"] = ".".join(map(str, cv)) if cv else None
+        info["thick"] = bool(cv and any(cv))
+
+        with get_oracle_conn(call_timeout_ms=3000) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT 1 FROM DUAL")
+        info["oracle_ok"] = True
+        return jsonify({"ok": True, "info": info})
+    except Exception as e:
+        return jsonify({"ok": False, "where": "oracle", "err": str(e), "info": info}), 500
 
 if __name__ == "__main__":
-    # pré-carrega colunas (falha cedo se service/credencial estiver errado)
     get_oracle_table_columns()
+    get_oracle_table_metadata()
     app.run(debug=True, host="0.0.0.0")
-
-
-
-
-
-
-
