@@ -12,7 +12,7 @@ COLUNAS_TABELA = [
     "COMPETENCIA_PAGAMENTO", "GUIA_COD_ID", "COD_ID_GUIA_GERAL", "TP_GUIA",
     "ITEM_COD", "TIP_GUIA", "VALOR", "ORIGEM_REDE", "DEMONSTRATIVO_FATURA",
     "COMPETENCIA_PROCESSAMENTO", "GUCID_COD_CID", "TP_ITEM", "SEQ", "DATA_EXECUCAO",
-    "QTDE", "LOCALIDADE", "UNIMED_EXEC", "INDICACAO_CLINICA", "GRUPO_FREQUENCIA",
+    "QTDE", "LOCALIDADE", "UNIMED_EXEC", "INDICACAO_CLINICA", "GRUPO_FREQUENCIA", "ID",
     "PREST_PAG", "TIP_FOR", "FORNECEDOR", "ITEM_DESCRI", "NM_SOLIC", "NC",
     "SEQUENCIA", "TIPO_LANCAMENTO", "CAPITULO", "GRUPO", "SUBGRUPO",
     "CARATER_ATENDIMENTO", "IDADE", "TIPO_ATENDIMENTO", "TIPO_ACOMODACAO",
@@ -23,6 +23,22 @@ COLUNAS_TABELA = [
     "PARAMETRO_LOC", "CPFCNPJ_EXEC", "CPFCNPJ_SOL", "OBSERVACO", "STATUS"
 ]
 
+# Mapeamento de tipos de dados para SQLite para ser mais fiel ao Oracle
+TIPOS_COLUNAS_SQLITE = {
+    # Padrão é TEXT
+    "VALOR": "REAL",
+    "QTDE": "INTEGER",
+    "IDADE": "INTEGER",
+    "SEQUENCIA": "INTEGER",
+    "SEQ": "INTEGER",
+    "VAL_FAT": "REAL",
+    "FAT_NRO": "INTEGER",
+    "UNI_COD_RESPON": "INTEGER",
+    "COMPETENCIA_PROCESSAMENTO": "INTEGER",
+    "PARAMETRO_INT": "REAL",
+    "PARAMETRO_LOC": "REAL",
+}
+
 def criar_tabela():
     """Cria a tabela no banco de dados se ela não existir."""
     conn = None
@@ -30,7 +46,9 @@ def criar_tabela():
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         
-        colunas_sql = ", ".join([f"{coluna} TEXT" for coluna in COLUNAS_TABELA])
+        colunas_sql = ", ".join(
+            [f'"{coluna}" {TIPOS_COLUNAS_SQLITE.get(coluna, "TEXT")}' for coluna in COLUNAS_TABELA]
+        )
         
         query_criacao = f"""
             CREATE TABLE IF NOT EXISTS {NOME_TABELA} (
@@ -64,11 +82,17 @@ def inserir_dados_do_excel():
 
     try:
         print("Lendo o arquivo Excel...")
-        df = pd.read_excel(ARQUIVO_EXCEL, header=0, usecols=COLUNAS_TABELA)
+        # Garante que todas as colunas sejam lidas como texto para evitar problemas de tipo
+        df = pd.read_excel(ARQUIVO_EXCEL, header=0, dtype=str)
+        # Seleciona e reordena as colunas para garantir a correspondência
+        df = df[COLUNAS_TABELA]
+
         df.columns = df.columns.str.strip()
         
         # Converte colunas de datas para string
         df = converter_datas_para_str(df)
+        # Substitui NaT/NaN por None (que se tornará NULL no SQL)
+        df = df.where(pd.notna(df), None)
 
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()

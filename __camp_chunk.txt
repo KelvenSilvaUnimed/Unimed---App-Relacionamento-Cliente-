@@ -1,0 +1,222 @@
+      const CAMPOS = [
+        // Usuário
+        { id:"MATRICULA", label:"Matr�cula"}, type:"text" },
+        { id:"VALOR", label:"Valor", type:"number", step:"0.01" },
+        { id:"QTDE", label:"Quantidade", type:"number", step:"1" },
+        { id:"UNIMED_EXEC", label:"Código Unimed Executante", type:"text" },
+        { id:"INDICACAO_CLINICA", label:"Indicação Clínica (Opcional)", type:"text" },
+        { id:"FORNECEDOR", label:"Fornecedor", type:"text" },
+        { id:"IDADE", label:"Idade do Benefici�rio", type:"number", step:"1" },
+        { id:"GUIA_COD", label:"Nº Guia Vinculada à Remoção", type:"text" },
+        { id:"GUIA_COD_PREST", label:"Código Guia Prestad", type:"text" },
+        { id:"NOME_PREST", label:"Nome Prestador", type:"text" },
+
+        // Selects
+        { id:"ORIGEM_REDE", label:"Origem Rede", type:"select" },
+        { id:"CARATER_ATENDIMENTO", label:"Caráter Atendimento", type:"select" },
+
+        // Automáticos
+        { id:"SEQUENCIA", label:"Sequência (Geral)", type:"number", step:"1" },
+        { id:"TIPO_ATENDIMENTO", label:"Tipo Atendimento", type:"text" },
+        { id:"COD", label:"C�d Fam�lia da Matr�cula", type:"text" },
+        { id:"STATUS", label:"Status", type:"text" },
+        { id:"DATPROCESSAMENTO", label:"Data Processamento", type:"date" },
+        { id:"CONTRATO", label:"Nº Contrato", type:"text" },
+        { id:"Compet�ncia Pagamento", type:"text" },
+        { id:"GUIA_COD_ID", label:"ID da Guia (Internação)", type:"text" },
+        { id:"TP_GUIA", label:"TP Guia", type:"text" },
+        { id:"ITEM_COD", label:"Item Cód", type:"text" },
+        { id:"TIP_GUIA", label:"Tip Guia", type:"text" },
+        { id:"DEMONSTRATIVO_FATURA", label:"Demonstrativo Fatura", type:"text" },
+        { id:"COMPETENCIA_PROCESSAMENTO", label:"Competência Processamento (YYYYMM)", type:"text" },
+        { id:"GUCID_COD_CID", label:"GUCID Cód CID", type:"text" },
+        { id:"TP_ITEM", label:"TP Item", type:"text" },
+        { id:"SEQ", label:"Seq (Item)", type:"number", step:"1" },
+        { id:"DATA_EXECUCAO", label:"Data Execução", type:"date" },
+        { id:"LOCALIDADE", label:"Localidade", type:"text" },
+        { id:"GRUPO_FREQUENCIA", label:"Grupo Frequência", type:"text" },
+        { id:"PREST_PAG", label:"Prest Pag", type:"text" },
+        { id:"TIP_FOR", label:"Tip For", type:"text" },
+        { id:"ITEM_DESCRI", label:"Item Descrição", type:"text" },
+        { id:"NM_SOLIC", label:"Nome Solic", type:"text" },
+        { id:"NC", label:"NC", type:"text" },
+        { id:"TIPO_LANCAMENTO", label:"Tipo Lançamento", type:"text" },
+        { id:"CAPITULO", label:"Capítulo", type:"text" },
+        { id:"GRUPO", label:"Grupo", type:"text" },
+        { id:"SUBGRUPO", label:"Subgrupo", type:"text" },
+        { id:"TIPO_ACOMODACAO", label:"Tipo Acomodação", type:"text" },
+        { id:"PARTICIPACAO", label:"Participação", type:"text" },
+        { id:"UNIMED", label:"Unimed", type:"text" },
+        { id:"CBO_EXEC_NRO", label:"CBO Exec Nº", type:"text" },
+        { id:"CBO_SOLIC_NRO", label:"CBO Solic Nº", type:"text" },
+        { id:"VAL_FAT", label:"Val Fat", type:"number", step:"0.01" },
+        { id:"FAT_NRO", label:"Fat Nº", type:"number", step:"1" },
+        { id:"COD_PREST_PAGTO", label:"Cód Prest Pagto", type:"text" },
+        { id:"UNI_COD_RESPON", label:"Unimed Cód Responsável", type:"number", step:"1" },
+
+        // Automáticos (SQL)
+        { id:"COD_CNTRAT_CART", label:"Cód Contrato Carteira", type:"text" },
+        { id:"COD_DEPNTE", label:"Cód Dependente", type:"text" },
+        { id:"Benefici�rio", label:"Nome do Benefici�rio", type:"text" },
+
+        { id:"GUITE_NRO_SENHA_SOLIT", label:"Guite Nº Senha Solicitado", type:"text" },
+        { id:"PRESTADOR_EXECUTANTE_ITEM", label:"Prestador Executante Item", type:"text" },
+        { id:"PARAMETRO_INT", label:"Parâmetro Int", type:"text" },
+        { id:"PARAMETRO_LOC", label:"Parâmetro Loc", type:"text" },
+        { id:"CPFCNPJ_EXEC", label:"CPF/CNPJ Executante", type:"text" },
+        { id:"CPFCNPJ_SOL", label:"CPF/CNPJ Solicitado", type:"text" },
+        { id:"OBSERVACO", label:"Observação", type:"text" },
+      ];
+
+      // ------------------ Tabela / Paginação ------------------
+      const clientesTbody = document.getElementById("clientesTbody");
+      const paginacao = document.getElementById("paginacao");
+      const pageInfo = document.getElementById("pageInfo");
+      const limitSelect = document.getElementById("limitSelect");
+
+      for (const opt of limitSelect.options) {
+        if (Number(opt.value) === limit) { opt.selected = true; break; }
+      }
+
+      const renderSkeleton = () => {
+        clientesTbody.innerHTML = `
+          <tr class="table-skeleton"><td colspan="5"></td></tr>
+          <tr class="table-skeleton"><td colspan="5"></td></tr>
+          <tr class="table-skeleton"><td colspan="5"></td></tr>
+        `;
+      };
+
+      const montarPaginacao = (total, page, limit) => {
+        paginacao.innerHTML = "";
+        pageInfo.textContent = total > 0
+          ? `Página ${page} � ${Math.min(total, page*limit) - limit + 1}–${Math.min(total, page*limit)} de ${total}`
+          : "—";
+        if (!total) return;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        if (totalPages <= 1) return;
+
+        const addItem = (label, p, disabled=false, active=false) => {
+          const li = document.createElement("li");
+          li.className = `page-item ${disabled ? "disabled" : ""} ${active ? "active" : ""}`;
+          li.innerHTML = `<button class="page-link" data-page="${p}">${escapeHTML(label)}</button>`;
+          paginacao.appendChild(li);
+        };
+
+        addItem("Anterior", Math.max(1, page - 1), page === 1, false);
+        const start = Math.max(1, page - 3);
+        const end = Math.min(totalPages, page + 3);
+        for (let p = start; p <= end; p++) addItem(String(p), p, false, p === page);
+        addItem("Próximo", Math.min(totalPages, page + 1), page === totalPages, false);
+      };
+
+      const carregarClientes = async (page = 1) => {
+        renderSkeleton();
+        try {
+          const data = await fetchJSON(API.clientes(page, limit), {}, 60000);
+          const clientes = data.clientes || [];
+          const total = Number(data.total || 0);
+          currentPage = Number(data.page || page);
+
+          if (!clientes.length) {
+            clientesTbody.innerHTML = `<tr><td colspan="5" class="text-center">Nenhum cliente encontrado.</td></tr>`;
+          } else {
+            clientesTbody.innerHTML = clientes.map(c => `
+              <tr>
+                <td>${escapeHTML(c.CONTRATO ?? "-")}</td>
+                <td>${escapeHTML(c.MATRICULA ?? "-")}</td>
+                <td>${escapeHTML(c.COMPETENCIA_PAGAMENTO ?? "-")}</td>
+                <td>${escapeHTML(c.BENEFICIARIO ?? "-")}</td>
+                <td>${formatCurrencyBRL(c.VALOR)}</td>
+              </tr>
+            `).join("");
+          }
+          montarPaginacao(total, currentPage, limit);
+        } catch (err) {
+          console.error(err);
+          showMessage((err && err.message) || "Erro ao carregar clientes.", "danger");
+          clientesTbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Erro ao carregar dados.</td></tr>`;
+        }
+      };
+
+      paginacao.addEventListener("click", (e) => {
+        const btn = e.target.closest("button.page-link");
+        if (!btn) return;
+        const p = Number(btn.dataset.page || 1);
+        carregarClientes(p);
+      });
+
+      limitSelect.addEventListener("change", () => {
+        limit = Math.max(1, Number(limitSelect.value || 10));
+        localStorage.setItem("clientes.limit", String(limit));
+        carregarClientes(1);
+      });
+
+      // ------------------ Novo Cadastro (Matr�cula) ------------------
+      const matriculaModalEl = document.getElementById("matriculaModal");
+      const clienteModalEl = document.getElementById("clienteModal");
+      const matriculaForm = document.getElementById("matriculaForm");
+      const matriculaInput = document.getElementById("matriculaInput");
+      const clienteForm = document.getElementById("clienteForm");
+      const salvarBtn = document.getElementById("salvarBtn");
+      const matriculaLoading = document.getElementById("matriculaLoading");
+
+      document.getElementById("logoutBtn").addEventListener("click", () => window.location.href = "/logout");
+
+      // <<< CORREÇÃO AQUI: apenas atribuímos às variáveis já declaradas >>>
+      matriculaModal = new bootstrap.Modal(matriculaModalEl);
+      clienteModal   = new bootstrap.Modal(clienteModalEl);
+
+      document.getElementById("novoCadastroBtn").addEventListener("click", () => {
+        matriculaForm.reset();
+        matriculaLoading.classList.add("visually-hidden");
+        matriculaModal.show();
+      });
+
+      const valueOr = (v, fallback) => (v === undefined || v === null || v === "" ? fallback : v);
+
+      function applyBusinessRulesFromRules(raw) {
+        const out = { ...raw };
+
+        Object.entries(RULES).forEach(([field, rule]) => {
+          if (rule.mode === "auto") {
+            const fromApi = rule.defaultFrom ? raw[rule.defaultFrom] : undefined;
+            const val = fromApi ?? (typeof rule.default === "function" ? rule.default() : rule.default);
+            out[field] = val;
+          }
+          if (rule.mode === "select") {
+            const def = typeof rule.default === "function" ? rule.default() : rule.default;
+            out[field] = valueOr(raw[field], def);
+          }
+        });
+
+        ["DATPROCESSAMENTO","DATA_EXECUCAO"].forEach(k=>{
+          if (out[k]) out[k] = String(out[k]).split("T")[0];
+        });
+
+        ["VALOR","SEQ","VAL_FAT","FAT_NRO","UNI_COD_RESPON","IDADE","QTDE","SEQUENCIA"].forEach(k=>{
+          if (out[k] !== undefined && out[k] !== null && out[k] !== "") {
+            const n = Number(String(out[k]).replace(",", "."));
+            if (!Number.isNaN(n)) out[k] = n;
+          }
+        });
+
+        out["SEQ"] = 1;
+        return out;
+      }
+
+      const montarFormulario = (dados = {}) => {
+        clienteForm.innerHTML = "";
+        formDirty = false;
+
+        const base = applyBusinessRulesFromRules(dados);
+
+        CAMPOS.forEach((campo) => {
+          const rule = RULES[campo.id] || { mode: "user" };
+          const isRequired = CAMPOS_OBRIGATORIOS_USER.includes(campo.id) && !rule.optional;
+          const readOnly = rule.mode === "auto";
+          const val = base[campo.id] ?? "";
+          const requiredStar = isRequired ? `<span class="required-star">*</span>` : "";
+          const stepAttr = campo.type === "number" ? `step="${campo.step || '1'}"` : "";
+
+          let control = "";
+          if (campo.type === "select" && rule.options) {
