@@ -1,4 +1,6 @@
 *.dll filter=lfs diff=lfs merge=lfs -text
 instantclient-basic-windows.x64-23.9.0.25.07/instantclient_23_9/oraociei.dll filter=lfs diff=lfs merge=lfs -text
+instantclient/**/*.so filter=lfs diff=lfs merge=lfs -text
+instantclient/**/*.so.* filter=lfs diff=lfs merge=lfs -text
 instantclient-basic-linux.x64-23.26.0.0.0/instantclient_23_26/*.so* filter=lfs diff=lfs merge=lfs -text
 instantclient-basic-linux.x64-23.26.0.0.0/instantclient_23_26/*.dll filter=lfs diff=lfs merge=lfs -text
