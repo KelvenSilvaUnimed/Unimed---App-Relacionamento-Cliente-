@@ -14,15 +14,24 @@ services:
     environment:
       # Garante que o SQLite fique no volume persistente
       SQLITE_DB_PATH: /app/data/relacionamento_cliente.db
-      # Deixe vazio para usar modo THIN (sem Instant Client). Se for usar THICK, veja o volume opcional abaixo.
-      ORACLE_THICK_LIB_DIR: ""
+      
+      # [CHAVE] Define o caminho DENTRO do container onde o Instant Client deve estar montado.
+      # Este caminho é essencial para o modo THICK do oracledb (necessário para NNE/DPY-3001).
+      ORACLE_THICK_LIB_DIR: "/opt/instantclient"
+      
+      # [CHAVE] Força a ativação do modo THICK para suportar recursos avançados de conexão (como Native Network Encryption).
+      ORACLE_USE_THICK: "true"
+      
       # Porta interna exposta pelo Gunicorn
       PORT: 8000
     volumes:
       # Volume nomeado para persistir o banco SQLite
       - unimed_data:/app/data
-      # OPCIONAL: monte o Instant Client se precisar do modo THICK
-      # - ./instantclient:/opt/instantclient:ro
+      
+      # [CHAVE] Mapeia a pasta local './instantclient' (que deve conter os binários Linux)
+      # para o caminho configurado no ORACLE_THICK_LIB_DIR DENTRO do container.
+      - ./instantclient:/opt/instantclient:ro
+      
     # Healthcheck equivalente ao Dockerfile
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
