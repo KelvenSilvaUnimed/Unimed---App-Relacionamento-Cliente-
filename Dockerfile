@@ -46,6 +46,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # 10) Processo de produção com Gunicorn
 # Obs: variável PORT pode ser passada em runtime, padrão 5000
-CMD ["gunicorn", "-w", "2", "-k", "gthread", "-t", "60", "-b", "0.0.0.0:${PORT:-8000}", "app:app"]
+CMD gunicorn -w 2 -k gthread -t 60 -b 0.0.0.0:${PORT:-8000} app:app
 
 
