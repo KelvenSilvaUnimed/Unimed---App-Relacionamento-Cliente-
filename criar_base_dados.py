@@ -3,8 +3,8 @@ import sqlite3
 import os
 
 # --- Configurações ---
-ARQUIVO_EXCEL = 'uni0177_tbtipoguia_comp.xlsx'
-NOME_TABELA = 'uni0177_tbtipoguia_comp'
+ARQUIVO_EXCEL = 'UNI0177_TBTIPOGUIA_REMOCAO.xlsx'
+NOME_TABELA = 'UNI0177_TBTIPOGUIA_REMOCAO'
 DB_NAME = 'relacionamento_cliente.db'
 
 COLUNAS_TABELA = [

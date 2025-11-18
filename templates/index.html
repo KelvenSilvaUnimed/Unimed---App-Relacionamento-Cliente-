@@ -1,20 +1,20 @@
-﻿﻿<!DOCTYPE html>
+﻿?<!DOCTYPE html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Sistema de Clientes</title>
 
-    <!-- Favicon -->
+    
     <link rel="icon" href="{{ url_for('static', filename='img/aviao.png') }}" type="image/png">
 
-    <!-- Bootstrap -->
+    
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
 
-    <!-- Estilos do app -->
+    
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style-main.css') }}" />
 
-    <!-- Ícones -->
+    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"/>
 
     <style>
@@ -57,6 +57,10 @@
                 <option value="100">100</option>
               </select>
             </div>
+            <div class="input-group input-group-sm" style="width: 220px;">
+              <label class="input-group-text" for="competenciaInput">Competência</label>
+              <input type="month" id="competenciaInput" class="form-control" aria-label="Competência mínima" />
+            </div>
             <button id="logsBtn" class="btn btn-info">Logs de Cadastros</button>
             <button id="excluirBtn" class="btn btn-danger">Excluir Registro</button>
             <button id="novoCadastroBtn" class="btn btn-success custom-btn">
@@ -65,10 +69,10 @@
           </div>
         </div>
 
-        <!-- Mensagens -->
+        
         <div id="mensagem" aria-live="polite"></div>
 
-        <!-- Tabela -->
+        
         <div class="table-responsive">
           <table class="table table-striped table-hover align-middle text-center" id="clientesTable">
             <thead class="table-dark">
@@ -97,7 +101,7 @@
       </div>
     </main>
 
-    <!-- Modal: perguntar Matrícula -->
+    
     <div class="modal fade" id="matriculaModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-sm modal-dialog-centered">
         <div class="modal-content">
@@ -134,7 +138,7 @@
       </div>
     </div>
 
-    <!-- Modal: formulário do cliente -->
+    
     <div class="modal fade" id="clienteModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-xl modal-dialog-centered">
         <div class="modal-content">
@@ -159,7 +163,7 @@
       </div>
     </div>
 
-    <!-- Modal: Logs -->
+    
     <div class="modal fade" id="logsModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-xl modal-dialog-centered">
         <div class="modal-content">
@@ -186,7 +190,7 @@
       </div>
     </div>
 
-    <!-- Modal: Excluir Registro -->
+    
     <div class="modal fade" id="deleteModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-sm modal-dialog-centered">
         <div class="modal-content">
@@ -211,7 +215,7 @@
         </div>
       </div>
     </div>
-    <!-- Modal: Ajuda / Documentação -->
+    
     <div class="modal fade" id="helpModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-xl modal-dialog-centered">
         <div class="modal-content">
@@ -271,18 +275,28 @@
         </div>
       </div>
     </div>
-    <!-- Bootstrap JS -->
+    
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-      // ------------------ Utilidades ------------------
       const API = {
-        clientes: (page, limit) => `/api/clientes?page=${page}&limit=${limit}`,
-        ultimoCadastro: (matricula) => `/api/ultimo-cadastro-por-matricula?matricula=${encodeURIComponent(matricula)}`,
+        clientes: (page, limit, timeout = 60000, competencia = "") => {
+          const params = new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+            timeout: String(timeout),
+          });
+          if (competencia) params.append("competencia_from", competencia);
+          return `/api/clientes?${params.toString()}`;
+        },
+        ultimoCadastro: (matricula) =>
+          `/api/ultimo-cadastro-por-matricula?matricula=${encodeURIComponent(matricula)}`,
         cadastrar: `/api/cadastrar-cliente`,
-        logs: (date) => `/api/logs?date=&timeout=60000&limit=2000`,
-        logsExport: (date) => `/api/logs/export?date=${encodeURIComponent(date)}&timeout=60000`,
-        excluir: `/api/excluir-registro`,
+        logs: (date, timeout = 60000, limit = 500) =>
+          `/api/logs?date=${encodeURIComponent(date)}&timeout=${timeout}&limit=${limit}`,
+        logsExport: (date, timeout = 60000) =>
+          `/api/logs/export?date=${encodeURIComponent(date)}&timeout=${timeout}`,
+        excluir: (timeout = 60000) => `/api/excluir-registro?timeout=${timeout}`,
       };
 
       const escapeHTML = (s) => {
@@ -301,31 +315,37 @@
         return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
       };
 
-      // Controla e cancela requisições concorrentes + timeouts
       let lastController = null;
-      const fetchJSON = async (url, options = {}, timeoutMs = 45000) => {
+      const fetchJSON = async (url, options = {}, timeoutMs = 60000) => {
+        const controller = new AbortController();
+        let timedOut = false;
+
+        const timer = timeoutMs
+          ? setTimeout(() => {
+              timedOut = true;
+              controller.abort();
+            }, timeoutMs)
+          : null;
+
+        if (lastController) {
+          lastController.abort();
+        }
+        lastController = controller;
+
+        const opts = {
+          credentials: "same-origin",
+          headers: { "Accept": "application/json", ...(options.headers || {}) },
+          signal: controller.signal,
+          ...options,
+        };
+
         try {
-          if (lastController) lastController.abort();
-          const controller = new AbortController();
-          lastController = controller;
-
-          const id = setTimeout(() => controller.abort(), timeoutMs);
-          const opts = {
-            credentials: "same-origin",
-            headers: { "Accept": "application/json", ...(options.headers || {}) },
-            signal: controller.signal,
-            ...options,
-          };
-
-          const res = await fetch(url, opts).catch((e) => {
-            if (e && e.name === "AbortError") throw new Error("Operação cancelada ou demorou demais.");
-            throw e;
-          });
-          clearTimeout(id);
+          const res = await fetch(url, opts);
+          if (timer) clearTimeout(timer);
 
           if (res.status === 401) {
             window.location.href = "/login";
-            throw new Error("Não autenticado");
+            throw new Error("Não autenticado.");
           }
 
           const data = await res.json().catch(() => ({}));
@@ -334,8 +354,20 @@
             throw new Error(msg);
           }
           return data;
+        } catch (e) {
+          if (timer) clearTimeout(timer);
+          if (e && e.name === "AbortError") {
+            if (timedOut) {
+              throw new Error("Tempo limite da requisição excedido.");
+            }
+            console.warn("Requisição abortada (substituída por outra):", url);
+            return null;
+          }
+          throw e;
         } finally {
-          lastController = null;
+          if (lastController === controller) {
+            lastController = null;
+          }
         }
       };
 
@@ -362,13 +394,11 @@
         }
       };
 
-      // ------------------ Estado ------------------
       let currentPage = 1;
       let limit = Number(localStorage.getItem("clientes.limit") || 10);
       let clienteModal, matriculaModal;  // <â€” serão atribuídos mais abaixo
       let formDirty = false;
 
-      // ------------------ Regras (front) ------------------
       const CAMPOS_OBRIGATORIOS_USER = [
         "Matrícula",
         "COD", // Cód Família da Matrícula
@@ -386,7 +416,6 @@
         "COD_CNTRAT_CART",
         "COD_DEPNTE",
         "BENEFICIARIO",
-        // Obrigatório pelo banco (NOT NULL)
         "ITEM_COD"
       ];
 
@@ -396,7 +425,6 @@
       ];
 
       const RULES = {
-        // Usuário
         MATRICULA: { mode: "user" },
         VALOR: { mode: "user" },
         QTDE: { mode: "user" },
@@ -408,11 +436,9 @@
         GUIA_COD_PREST: { mode: "user" },
         NOME_PREST: { mode: "user" },
 
-        // Selects
         ORIGEM_REDE: { mode: "select", options: ["OUTRA OPERADORA","REDE LOCAL"], default: "OUTRA OPERADORA" },
         CARATER_ATENDIMENTO: { mode: "select", options: ["E","U"], default: "E" },
 
-        // Automáticos
         SEQUENCIA: { mode: "auto", defaultFrom: "PROXIMA_SEQUENCIA" },
         TIPO_ATENDIMENTO: { mode: "auto", default: "REMOCAO" },
         COD: { mode: "user" },
@@ -420,7 +446,6 @@
         DATPROCESSAMENTO: { mode: "auto", default: () => new Date().toISOString().slice(0,10) },
         CONTRATO: { mode: "user" },
         COMPETENCIA_PAGAMENTO: { mode: "auto", default: "" },
-        // Campos obrigatórios que precisam ser editáveis pelo usuário
         GUIA_COD_ID: { mode: "user" },
         TP_GUIA: { mode: "auto", default: "P" },
         ITEM_COD: { mode: "user" },
@@ -454,7 +479,6 @@
         COD_PREST_PAGTO: { mode: "auto", default: "" },
         UNI_COD_RESPON: { mode: "auto", default: 177 },
 
-        // Agora automáticos (SQL)
         COD_CNTRAT_CART: { mode: "user" },
         COD_DEPNTE: { mode: "user" },
         BENEFICIARIO: { mode: "user" },
@@ -469,7 +493,6 @@
       };
 
       const CAMPOS = [
-        // Usuário
         { id:"MATRICULA", label:"Matrícula", type:"text" },
         { id:"VALOR", label:"Valor", type:"number", step:"0.01" },
         { id:"QTDE", label:"Quantidade", type:"number", step:"1", default: 1 },
@@ -481,11 +504,9 @@
         { id:"GUIA_COD_PREST", label:"Código Guia Prestador", type:"text" },
         { id:"NOME_PREST", label:"Nome Prestador", type:"text" },
 
-        // Selects
         { id:"ORIGEM_REDE", label:"Origem Rede", type:"select" },
         { id:"CARATER_ATENDIMENTO", label:"Caráter Atendimento", type:"select" },
 
-        // Automáticos
         { id:"SEQUENCIA", label:"Sequência (Geral)", type:"number", step:"1" },
         { id:"TIPO_ATENDIMENTO", label:"Tipo Atendimento", type:"text" },
         { id:"COD", label:"Cód. Família da Matrícula", type:"text" },
@@ -524,7 +545,6 @@
         { id:"COD_PREST_PAGTO", label:"Cód Prest Pagto", type:"text" },
         { id:"UNI_COD_RESPON", label:"Unimed Cód Responsável", type:"number", step:"1" },
 
-        // Automáticos (SQL)
         { id:"COD_CNTRAT_CART", label:"Cód Contrato Carteira", type:"text" },
         { id:"COD_DEPNTE", label:"Cód Dependente", type:"text" },
         { id:"BENEFICIARIO", label:"Nome do Beneficiário", type:"text" }, // Corrigido para corresponder ao backend
@@ -537,3 +557,520 @@
         { id:"CPFCNPJ_SOL", label:"CPF/CNPJ Solicitante", type:"text" },
         { id:"OBSERVACO", label:"Observação", type:"text" },
       ];
+
+      const clientesTbody = document.getElementById("clientesTbody");
+      const paginacao = document.getElementById("paginacao");
+      const pageInfo = document.getElementById("pageInfo");
+      const limitSelect = document.getElementById("limitSelect");
+      const competenciaInput = document.getElementById("competenciaInput");
+
+      Array.from(limitSelect?.options || []).forEach((opt) => {
+        if (Number(opt.value) === limit) {
+          opt.selected = true;
+        }
+      });
+
+      const renderSkeleton = () => {
+        if (!clientesTbody) return;
+        clientesTbody.innerHTML = `
+          <tr class="table-skeleton"><td colspan="5"></td></tr>
+          <tr class="table-skeleton"><td colspan="5"></td></tr>
+          <tr class="table-skeleton"><td colspan="5"></td></tr>
+        `;
+        if (pageInfo) pageInfo.textContent = "Carregando clientes...";
+      };
+
+      const montarPaginacao = (total, page, pageSize) => {
+        if (!paginacao || !pageInfo) return;
+        paginacao.innerHTML = "";
+        const safeTotal = Number.isFinite(total) ? Math.max(0, total) : 0;
+        const totalPages = safeTotal > 0 ? Math.ceil(safeTotal / pageSize) : 0;
+
+        if (safeTotal === 0) {
+          pageInfo.textContent = "Nenhum registro encontrado.";
+        } else {
+          const start = (page - 1) * pageSize + 1;
+          const end = Math.min(safeTotal, page * pageSize);
+          pageInfo.textContent = `Mostrando ${start}-${end} de ${safeTotal}`;
+        }
+
+        if (totalPages <= 1) {
+          return;
+        }
+
+        const addItem = (label, targetPage, disabled = false, active = false) => {
+          const li = document.createElement("li");
+          li.className = `page-item${disabled ? " disabled" : ""}${active ? " active" : ""}`;
+          li.innerHTML = `<button type="button" class="page-link" data-page="${targetPage}">${label}</button>`;
+          paginacao.appendChild(li);
+        };
+
+        addItem("&laquo;", Math.max(1, page - 1), page <= 1);
+        const windowSize = 5;
+        let startPage = Math.max(1, page - Math.floor(windowSize / 2));
+        let endPage = Math.min(totalPages, startPage + windowSize - 1);
+        if (endPage - startPage < windowSize - 1) {
+          startPage = Math.max(1, endPage - windowSize + 1);
+        }
+        for (let p = startPage; p <= endPage; p += 1) {
+          addItem(String(p), p, false, p === page);
+        }
+        addItem("&raquo;", Math.min(totalPages, page + 1), page >= totalPages);
+      };
+
+      const getCompetenciaFilter = () => {
+        const raw = competenciaInput?.value || "";
+        if (!raw) return "";
+        const [year, month] = raw.split("-");
+        if (!year || !month) return "";
+        return `${year}${month}`;
+      };
+
+      if (competenciaInput) {
+        const stored = localStorage.getItem("clientes.competencia");
+        if (stored && /^\d{6}$/.test(stored)) {
+          competenciaInput.value = `${stored.slice(0, 4)}-${stored.slice(4)}`;
+        } else {
+          const now = new Date();
+          const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+          competenciaInput.value = defaultMonth;
+          localStorage.setItem("clientes.competencia", defaultMonth.replace("-", ""));
+        }
+      }
+
+      const carregarClientes = async (page = 1) => {
+        currentPage = page;
+        renderSkeleton();
+        try {
+          const oracleTimeoutMs = 90000;
+          const browserTimeoutMs = 110000;
+          const competenciaFilter = getCompetenciaFilter();
+          const data = await fetchJSON(
+            API.clientes(page, limit, oracleTimeoutMs, competenciaFilter),
+            {},
+            browserTimeoutMs
+          );
+          if (!data) return;
+          const clientes = data?.clientes || [];
+          const total = data?.total ?? clientes.length;
+
+          if (!clientes.length) {
+            clientesTbody.innerHTML = `<tr><td colspan="5" class="text-center">Nenhum cliente encontrado.</td></tr>`;
+            if (pageInfo) pageInfo.textContent = "Nenhum registro encontrado.";
+          } else {
+            clientesTbody.innerHTML = clientes.map((c) => `
+              <tr>
+                <td>${escapeHTML(c.CONTRATO ?? "-")}</td>
+                <td>${escapeHTML(c.MATRICULA ?? "-")}</td>
+                <td>${escapeHTML(c.COMPETENCIA_PAGAMENTO ?? "-")}</td>
+                <td>${escapeHTML(c.BENEFICIARIO ?? "-")}</td>
+                <td>${formatCurrencyBRL(c.VALOR)}</td>
+              </tr>
+            `).join("");
+          }
+          montarPaginacao(total, currentPage, limit);
+        } catch (err) {
+          console.error(err);
+          showMessage((err && err.message) || "Erro ao carregar clientes.", "danger");
+          clientesTbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Erro ao carregar dados.</td></tr>`;
+          if (pageInfo) pageInfo.textContent = "Erro ao carregar clientes.";
+        }
+      };
+
+      paginacao?.addEventListener("click", (event) => {
+        const btn = event.target.closest("button.page-link");
+        if (!btn) return;
+        const nextPage = Number(btn.dataset.page || "1");
+        if (!Number.isNaN(nextPage) && nextPage > 0 && nextPage !== currentPage) {
+          carregarClientes(nextPage);
+        }
+      });
+
+      limitSelect?.addEventListener("change", () => {
+        limit = Math.max(1, Number(limitSelect.value || "10"));
+        localStorage.setItem("clientes.limit", String(limit));
+        carregarClientes(1);
+      });
+
+      competenciaInput?.addEventListener("change", () => {
+        const raw = competenciaInput.value;
+        const normalized = raw ? raw.replace("-", "") : "";
+        localStorage.setItem("clientes.competencia", normalized);
+        carregarClientes(1);
+      });
+
+      const toggleBtnBusy = (btn, isLoading, text = "Processando...") => {
+        if (!btn) return;
+        if (isLoading) {
+          if (!btn.dataset.originalText) {
+            btn.dataset.originalText = btn.innerHTML;
+          }
+          btn.disabled = true;
+          btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>${text}`;
+        } else {
+          btn.disabled = false;
+          if (btn.dataset.originalText) {
+            btn.innerHTML = btn.dataset.originalText;
+            delete btn.dataset.originalText;
+          }
+        }
+      };
+
+      const matriculaModalEl = document.getElementById("matriculaModal");
+      const clienteModalEl = document.getElementById("clienteModal");
+      const logsModalEl = document.getElementById("logsModal");
+      const deleteModalEl = document.getElementById("deleteModal");
+      const helpModalEl = document.getElementById("helpModal");
+
+      matriculaModal = matriculaModalEl ? new bootstrap.Modal(matriculaModalEl) : null;
+      clienteModal = clienteModalEl ? new bootstrap.Modal(clienteModalEl) : null;
+      const logsModal = logsModalEl ? new bootstrap.Modal(logsModalEl) : null;
+      const deleteModal = deleteModalEl ? new bootstrap.Modal(deleteModalEl) : null;
+      const helpModal = helpModalEl ? new bootstrap.Modal(helpModalEl) : null;
+
+      const matriculaForm = document.getElementById("matriculaForm");
+      const matriculaInput = document.getElementById("matriculaInput");
+      const clienteForm = document.getElementById("clienteForm");
+      const salvarBtn = document.getElementById("salvarBtn");
+      const matriculaLoading = document.getElementById("matriculaLoading");
+      const logsForm = document.getElementById("logsForm");
+      const logsDate = document.getElementById("logsDate");
+      const logsResults = document.getElementById("logsResults");
+      const exportLogsBtn = document.getElementById("exportLogsBtn");
+      const buscarLogsBtn = document.getElementById("buscarLogsBtn");
+      const deleteForm = document.getElementById("deleteForm");
+      const confirmDeleteBtn = document.getElementById("confirmDeleteBtn");
+      const delDateInput = document.getElementById("delDate");
+      const delGuiaInput = document.getElementById("delGuia");
+
+      document.getElementById("logoutBtn")?.addEventListener("click", () => {
+        window.location.href = "/logout";
+      });
+
+      document.getElementById("novoCadastroBtn")?.addEventListener("click", () => {
+        matriculaForm?.reset();
+        matriculaForm?.classList.remove("was-validated");
+        matriculaLoading?.classList.add("visually-hidden");
+        matriculaModal?.show();
+        setTimeout(() => matriculaInput?.focus(), 200);
+      });
+
+      document.getElementById("logsBtn")?.addEventListener("click", () => {
+        logsForm?.reset();
+        logsForm?.classList.remove("was-validated");
+        logsResults.innerHTML = "";
+        if (exportLogsBtn) {
+          exportLogsBtn.disabled = true;
+          delete exportLogsBtn.dataset.date;
+        }
+        if (logsDate) {
+          logsDate.value = new Date().toISOString().slice(0, 10);
+        }
+        logsModal?.show();
+      });
+
+      document.getElementById("excluirBtn")?.addEventListener("click", () => {
+        deleteForm?.reset();
+        deleteForm?.classList.remove("was-validated");
+        deleteModal?.show();
+      });
+
+      document.getElementById("helpBtn")?.addEventListener("click", () => {
+        helpModal?.show();
+      });
+
+      const valueOr = (v, fallback) => (v === undefined || v === null || v === "" ? fallback : v);
+
+      function applyBusinessRulesFromRules(raw) {
+        const out = { ...raw };
+
+        Object.entries(RULES).forEach(([field, rule]) => {
+          if (rule.mode === "auto") {
+            const fromApi = rule.defaultFrom ? raw[rule.defaultFrom] : undefined;
+            const val = fromApi ?? (typeof rule.default === "function" ? rule.default() : rule.default);
+            out[field] = val;
+          }
+          if (rule.mode === "select") {
+            const def = typeof rule.default === "function" ? rule.default() : rule.default;
+            out[field] = valueOr(raw[field], def);
+          }
+        });
+
+        ["DATPROCESSAMENTO", "DATA_EXECUCAO"].forEach((k) => {
+          if (out[k]) out[k] = String(out[k]).split("T")[0];
+        });
+
+        ["VALOR", "SEQ", "VAL_FAT", "FAT_NRO", "UNI_COD_RESPON", "IDADE", "QTDE", "SEQUENCIA"].forEach((k) => {
+          if (out[k] !== undefined && out[k] !== null && out[k] !== "") {
+            const n = Number(String(out[k]).replace(",", "."));
+            if (!Number.isNaN(n)) out[k] = n;
+          }
+        });
+
+        out["SEQ"] = 1;
+        return out;
+      }
+
+      const montarFormulario = (dados = {}) => {
+        if (!clienteForm) return;
+        clienteForm.innerHTML = "";
+        clienteForm.classList.remove("was-validated");
+        formDirty = false;
+
+        const base = applyBusinessRulesFromRules(dados);
+
+        CAMPOS.forEach((campo) => {
+          const rule = RULES[campo.id] || { mode: "user" };
+          const isRequired = CAMPOS_OBRIGATORIOS_USER.includes(campo.id) && !rule.optional;
+          const readOnly = rule.mode === "auto";
+          const val = base[campo.id] ?? "";
+          const requiredStar = isRequired ? `<span class="required-star">*</span>` : "";
+          const readOnlyClass = readOnly ? "readonly-like" : "";
+          const stepAttr = campo.type === "number" && campo.step ? ` step="${campo.step}"` : "";
+
+          let control = "";
+          if (campo.type === "select" && Array.isArray(rule.options)) {
+            const options = rule.options.map((opt) => {
+              const selected = String(opt) === String(val) ? " selected" : "";
+              return `<option value="${escapeHTML(opt)}"${selected}>${escapeHTML(opt)}</option>`;
+            }).join("");
+            const disabledAttr = readOnly ? " disabled" : "";
+            control = `<select class="form-select ${readOnlyClass}" id="${campo.id}" name="${campo.id}"${disabledAttr}${isRequired ? " required" : ""}>${options}</select>`;
+            if (readOnly) {
+              control += `<input type="hidden" name="${campo.id}" value="${escapeHTML(val)}">`;
+            }
+          } else {
+            const typeAttr = campo.type || "text";
+            const safeVal = val === null || val === undefined ? "" : val;
+            control = `<input type="${typeAttr}" class="form-control ${readOnlyClass}" id="${campo.id}" name="${campo.id}" value="${escapeHTML(safeVal)}"${isRequired ? " required" : ""}${readOnly ? " readonly" : ""}${stepAttr}>`;
+          }
+
+          clienteForm.insertAdjacentHTML(
+            "beforeend",
+            `
+            <div class="col-md-4 col-sm-6">
+              <label class="form-label" for="${campo.id}">${campo.label}${requiredStar}</label>
+              ${control}
+            </div>
+            `
+          );
+        });
+
+        const firstInput = clienteForm.querySelector("input:not([type='hidden']), select, textarea");
+        if (firstInput) firstInput.focus();
+      };
+
+      matriculaForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        matriculaForm.classList.add("was-validated");
+        const matricula = (matriculaInput?.value || "").trim();
+        if (!matricula) return;
+
+        matriculaInput.disabled = true;
+        matriculaLoading?.classList.remove("visually-hidden");
+        try {
+          const result = await fetchJSON(API.ultimoCadastro(matricula));
+          const dados = result?.data || {};
+          montarFormulario({ ...dados, MATRICULA: matricula });
+          matriculaModal?.hide();
+          clienteModal?.show();
+          showMessage(result?.msg || "Dados carregados.", "success");
+        } catch (err) {
+          console.error(err);
+          showMessage(err.message || "Erro ao buscar matricula.", "danger");
+        } finally {
+          matriculaInput.disabled = false;
+          matriculaLoading?.classList.add("visually-hidden");
+        }
+      });
+
+      clienteForm?.addEventListener("input", () => {
+        formDirty = true;
+      });
+      clienteForm?.addEventListener("change", () => {
+        formDirty = true;
+
+      });
+
+      clienteForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        clienteForm.classList.add("was-validated");
+        if (!clienteForm.checkValidity()) return;
+
+        const formData = new FormData(clienteForm);
+        const payload = {};
+        formData.forEach((value, key) => {
+          payload[key] = typeof value === "string" ? value.trim() : value;
+        });
+
+        setBtnLoading(salvarBtn, true);
+        try {
+          const result = await fetchJSON(API.cadastrar, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          showMessage(result?.msg || "Cliente cadastrado com sucesso.", "success");
+          formDirty = false;
+          clienteModal?.hide();
+          carregarClientes(1);
+        } catch (err) {
+          console.error(err);
+          showMessage(err.message || "Erro ao salvar cliente.", "danger");
+        } finally {
+          setBtnLoading(salvarBtn, false);
+        }
+      });
+
+      clienteModalEl?.addEventListener("hide.bs.modal", (event) => {
+        if (formDirty) {
+          const discard = confirm("Existem alteracoes nao salvas. Deseja descartar?");
+          if (!discard) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return;
+          }
+        }
+        formDirty = false;
+        clienteForm?.classList.remove("was-validated");
+        clienteForm?.replaceChildren();
+      });
+
+      window.addEventListener("beforeunload", (event) => {
+        if (formDirty) {
+          event.preventDefault();
+          event.returnValue = "";
+        }
+      });
+
+      const LOG_COLUMNS = [
+        { key: "DATPROCESSAMENTO", label: "Data Processamento" },
+        { key: "GUIA_COD_ID", label: "Guia (ID)" },
+        { key: "GUIA_COD", label: "Guia" },
+        { key: "MATRICULA", label: "Matrícula" },
+        { key: "BENEFICIARIO", label: "Beneficiário" },
+        { key: "VALOR", label: "Valor (R$)" },
+        { key: "TIPO_ATENDIMENTO", label: "Tipo Atendimento" },
+      ];
+
+      const renderLogsTable = (columns = [], rows = []) => {
+        if (!logsResults) return;
+        if (!rows.length) {
+          logsResults.innerHTML = `<p class="text-muted mb-0">Nenhum registro para a data informada.</p>`;
+          return;
+        }
+
+        const activeColumns = columns?.length ? columns : LOG_COLUMNS.map((c) => c.key);
+        const header = LOG_COLUMNS.filter((col) => activeColumns.includes(col.key))
+          .map((col) => `<th scope="col">${escapeHTML(col.label)}</th>`)
+          .join("");
+
+        const body = rows
+          .map(
+            (row) =>
+              `<tr>${LOG_COLUMNS.filter((col) => activeColumns.includes(col.key))
+                .map((col) => {
+                  if (col.key === "VALOR") {
+                    return `<td>${formatCurrencyBRL(row[col.key])}</td>`;
+                  }
+                  return `<td>${escapeHTML(row[col.key] ?? "")}</td>`;
+                })
+                .join("")}</tr>`
+          )
+          .join("");
+
+        logsResults.innerHTML = `
+          <table class="table table-striped table-sm">
+            <thead class="table-light"><tr>${header}</tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+        `;
+      };
+
+      logsForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        logsForm.classList.add("was-validated");
+        const date = logsDate?.value;
+        if (!date) return;
+        toggleBtnBusy(buscarLogsBtn, true, "Buscando...");
+        if (exportLogsBtn) {
+          exportLogsBtn.disabled = true;
+          delete exportLogsBtn.dataset.date;
+        }
+        logsResults.innerHTML = "";
+        try {
+          const oracleTimeout = 120000;
+          const browserTimeout = 140000;
+          const result = await fetchJSON(
+            API.logs(date, oracleTimeout, 500),
+            {},
+            browserTimeout
+          );
+          if (!result) return;
+          renderLogsTable(result?.columns || [], result?.rows || []);
+          const total = result?.total ?? 0;
+          if (result?.partial) {
+            showMessage(
+              `Logs carregados parcialmente (${total} registro${total === 1 ? "" : "s"}). Tente refinar a data ou exportar para CSV.`,
+              "warning"
+            );
+          } else {
+            showMessage(`Logs carregados (${total} registro${total === 1 ? "" : "s"}).`, "success");
+          }
+          if (exportLogsBtn && total > 0) {
+            exportLogsBtn.disabled = false;
+            exportLogsBtn.dataset.date = date;
+          }
+        } catch (err) {
+          console.error(err);
+          showMessage(err.message || "Erro ao buscar logs.", "danger");
+          logsResults.innerHTML = `<p class="text-danger mb-0">${escapeHTML(err.message || "Erro ao buscar logs.")}</p>`;
+        } finally {
+          toggleBtnBusy(buscarLogsBtn, false);
+        }
+      });
+
+      exportLogsBtn?.addEventListener("click", () => {
+        const date = exportLogsBtn.dataset.date;
+        if (!date) return;
+        const oracleTimeout = 120000;
+        window.open(API.logsExport(date, oracleTimeout), "_blank", "noopener");
+      });
+
+      deleteForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        deleteForm.classList.add("was-validated");
+        const date = delDateInput?.value;
+        const guia = (delGuiaInput?.value || "").trim();
+        if (!date || !guia) return;
+
+        toggleBtnBusy(confirmDeleteBtn, true, "Excluindo...");
+        try {
+          const payload = { DATPROCESSAMENTO: date, GUIA_COD: guia };
+          const oracleTimeout = 90000;
+          const browserTimeout = 110000;
+          const result = await fetchJSON(
+            API.excluir(oracleTimeout),
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            },
+            browserTimeout
+          );
+          if (!result) return;
+          showMessage(result?.msg || "Registro excluido.", "success");
+          deleteModal?.hide();
+          carregarClientes(currentPage);
+        } catch (err) {
+          console.error(err);
+          showMessage(err.message || "Erro ao excluir registro.", "danger");
+        } finally {
+          toggleBtnBusy(confirmDeleteBtn, false);
+        }
+      });
+
+      carregarClientes(1);
+    </script>
+  </body>
+</html>
